@@ -1,4 +1,5 @@
 import queue
+import re
 import sys
 import threading
 import time
@@ -37,6 +38,10 @@ from config import (
     CONVERSATION_WINDOW_SECONDS,
     GREET_ON_START,
     LIBRARY_DIR,
+    BARGE_IN,
+    ECHO_MATCH_RATIO,
+    BARGE_IN_MIN_WORDS,
+    SPOKEN_COMMANDS,
 )
 
 HELP = """
@@ -270,6 +275,56 @@ class Keyboard:
         return line.strip()
 
 
+def spoken_command(text: str) -> str | None:
+    """Map a said-aloud instruction onto the typed command that does it.
+
+    "Lia, stop listening" should switch the mic off, not become something she
+    muses about.
+    """
+    cleaned = re.sub(r"[^a-z\s]", "", text.lower()).strip()
+    cleaned = " ".join(cleaned.split())
+    if not cleaned or len(cleaned.split()) > 6:
+        return None
+
+    for command, phrases in SPOKEN_COMMANDS.items():
+        for phrase in phrases:
+            if cleaned == phrase or cleaned.startswith(phrase) or cleaned.endswith(phrase):
+                return command
+    return None
+
+
+def wait_for_her(speaker: voice.Speaker, listener, state: dict) -> str | None:
+    """Let her finish speaking -- unless you talk over her.
+
+    Returns what you said if you interrupted, otherwise None.
+    """
+    barge_in = (
+        BARGE_IN
+        and state.get("listening")
+        and state.get("open_mic")
+        and listener is not None
+        and speaker.enabled
+    )
+
+    if not barge_in:
+        speaker.wait()
+        return None
+
+    while speaker.is_busy():
+        heard = listener.listen_open(hint=speech_hint(), abort=lambda: not speaker.is_busy())
+        if not heard:
+            continue
+        if speaker.sounds_like_me(heard, ratio=ECHO_MATCH_RATIO):
+            continue                       # that was her own voice coming back
+        if len(heard.split()) < BARGE_IN_MIN_WORDS:
+            continue                       # a cough, not an interruption
+        speaker.drop_pending()
+        print(f"\n  [you cut in: {heard}]\n")
+        return heard
+
+    return None
+
+
 def accept_spoken(spoken: str, state: dict) -> str | None:
     """Decide whether something heard was actually meant for her.
 
@@ -289,6 +344,11 @@ def accept_spoken(spoken: str, state: dict) -> str | None:
     if in_conversation:
         return spoken
     return None
+
+
+def as_instruction(text: str) -> str:
+    """Turn a spoken instruction into its command form, if it is one."""
+    return spoken_command(text) or text
 
 
 def speech_hint() -> str:
@@ -320,7 +380,7 @@ def read_input(
             if spoken:
                 meant_for_her = accept_spoken(spoken, state)
                 if meant_for_her:
-                    return meant_for_her
+                    return as_instruction(meant_for_her)
             if controls and controls.close_now.is_set():
                 return ""
         raise EOFError("stopped")
@@ -361,7 +421,7 @@ def read_input(
                 print(f"  [heard \"{spoken}\" -- not addressed to me]".ljust(60), end="\r", flush=True)
                 continue
             print(f"\n  heard: {spoken}\n")
-            return meant_for_her
+            return as_instruction(meant_for_her)
 
 
 def format_transcript(short_term: list[dict]) -> str:
@@ -517,6 +577,8 @@ def main(controls: "Controls | None" = None):
             # without having to say her name first.
             state["last_reply_at"] = time.monotonic()
 
+    pending_input: str | None = None
+
     while True:
         if controls is not None and controls.quit.is_set():
             stop_watchdog.set()
@@ -530,7 +592,11 @@ def main(controls: "Controls | None" = None):
                 print("[closed out the conversation]")
 
         try:
-            user_input = read_input(listener, state, keys, controls)
+            if pending_input:
+                # You cut her off last turn -- what you said is already waiting.
+                user_input, pending_input = as_instruction(pending_input), None
+            else:
+                user_input = read_input(listener, state, keys, controls)
         except (EOFError, KeyboardInterrupt):
             user_input = "bye"
 
@@ -610,16 +676,16 @@ def main(controls: "Controls | None" = None):
         memory.remember_turn(session.id, "assistant", reply)
         clear_status()
 
-        # Don't reopen the mic until she's finished speaking and the room has
-        # settled -- otherwise she hears her own tail through the speakers and
-        # starts answering herself.
-        speaker.wait()
-        if state["listening"] and state["open_mic"]:
+        # Let her finish -- or let you talk over her. Without barge-in this just
+        # blocks until playback ends, so she never hears her own tail.
+        interruption = wait_for_her(speaker, listener, state)
+        if not interruption and state["listening"] and state["open_mic"]:
             time.sleep(MIC_SETTLE_SECONDS)
 
         # The conversation window starts when she stops talking, not when she
         # started -- otherwise a long reply eats most of it.
         state["last_reply_at"] = time.monotonic()
+        pending_input = interruption
 
 
 if __name__ == "__main__":

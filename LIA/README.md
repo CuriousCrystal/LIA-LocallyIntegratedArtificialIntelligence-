@@ -77,8 +77,22 @@ In the terminal you can type instead, and these commands work:
 bye                end the session
 ```
 
-Ctrl+C cuts her off mid-sentence. You can't interrupt her by talking — the mic
-stays shut while she speaks so she doesn't hear herself.
+**Interrupting her:** just start talking. The mic stays open while she speaks,
+and anything it hears is checked against what she's currently saying — her own
+voice coming back through the speakers is ignored, yours cuts her off. Clean on
+headphones; on speakers it depends on how much of her voice the mic picks up.
+Set `BARGE_IN = False` to go back to letting her finish.
+
+**Spoken instructions** do something rather than becoming conversation:
+
+```
+"Lia, stop listening"   /  "go to sleep"      → mic off
+"Lia, start listening"  /  "wake up"          → mic on
+"Lia, be quiet"         /  "stop talking"     → voice off
+"Lia, you can talk"                           → voice on
+```
+
+Edit `SPOKEN_COMMANDS` in `config.py` to add your own phrasings.
 
 ## Giving her things to read
 

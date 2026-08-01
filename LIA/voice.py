@@ -59,6 +59,7 @@ def _play(audio, sample_rate):
 # TTS engine will happily read the asterisks out loud.
 _STAGE_DIRECTION = re.compile(r"\*[^*]{0,80}\*")
 _MARKDOWN = re.compile(r"[*_`#]")
+_WORDS_ONLY = re.compile(r"[a-z']+")
 
 
 def speakable(text: str) -> str:
@@ -203,6 +204,10 @@ class Speaker:
         self._queue: queue.Queue = queue.Queue()
         self._thread = None
         self._error_shown = False
+        self._speaking = False
+        # What she is saying right now, plus what she just said -- used to tell
+        # her own voice coming back through the speakers from you talking.
+        self._recent = collections.deque(maxlen=3)
 
     @property
     def voice_name(self) -> str:
@@ -223,12 +228,38 @@ class Speaker:
             self._thread.start()
         return True
 
+    def is_busy(self) -> bool:
+        """True while there's audio playing or queued."""
+        return self._speaking or not self._queue.empty()
+
+    def sounds_like_me(self, heard: str, ratio: float = 0.5) -> bool:
+        """Is this the tail of her own voice, picked up through the speakers?
+
+        Compares against what she is saying and just said. Cheap, and it makes
+        interrupting her workable without headphones.
+        """
+        words = set(_WORDS_ONLY.findall(heard.lower()))
+        if not words:
+            return True
+
+        mine = set()
+        for line in list(self._recent):
+            mine.update(_WORDS_ONLY.findall(line.lower()))
+        if not mine:
+            return False
+
+        overlap = len(words & mine) / len(words)
+        return overlap >= ratio
+
     def _worker(self):
         while True:
             text = self._queue.get()
             if text is None:
+                self._speaking = False
                 break
             try:
+                self._speaking = True
+                self._recent.append(text)
                 self._engine.say(text)
             except KeyboardInterrupt:
                 pass
@@ -237,6 +268,7 @@ class Speaker:
                     print(f"\n[voice] playback failed: {exc}")
                     self._error_shown = True
             finally:
+                self._speaking = False
                 self._queue.task_done()
 
     def say(self, text: str):

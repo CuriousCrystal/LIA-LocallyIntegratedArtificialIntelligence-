@@ -146,6 +146,34 @@ If your diary notes are given below, you may lightly touch on something from
 them -- but only what is actually written there. Never invent a shared memory.
 Do not ask more than one question. Write only the greeting."""
 
+# --- interrupting her ---
+# Keep the mic open while she speaks, so you can cut her off by talking.
+# On headphones this is clean. On speakers she hears her own voice, so anything
+# heard is checked against what she's currently saying and ignored if it matches
+# -- see Speaker.sounds_like_me().
+BARGE_IN = True
+
+# How much of what's heard has to match her own words to count as echo rather
+# than you. Higher = more likely to mistake her voice for yours; lower = more
+# likely to ignore you while she's talking.
+ECHO_MATCH_RATIO = 0.5
+
+# Ignore very short interruptions while she's speaking -- a cough or a stray
+# syllable shouldn't stop her mid-sentence.
+BARGE_IN_MIN_WORDS = 2
+
+# --- spoken commands ---
+# Said aloud, these do something instead of becoming conversation. Matched after
+# her name is stripped, so "Lia, stop listening" works.
+SPOKEN_COMMANDS = {
+    "/mic off": ["stop listening", "stop hearing me", "go to sleep", "sleep now", "mic off"],
+    "/mic on": ["start listening", "wake up", "you can listen", "mic on"],
+    "/voice off": ["stop talking", "be quiet", "quiet please", "hush", "mute yourself"],
+    "/voice on": ["you can talk", "start talking", "unmute"],
+    "/wake off": ["listen to everything"],
+    "/wake on": ["only answer to your name"],
+}
+
 # --- wake word ---
 # With an open mic she'd otherwise answer every conversation in the room. When
 # this is on she only responds if you say her name, and then stays open for a
