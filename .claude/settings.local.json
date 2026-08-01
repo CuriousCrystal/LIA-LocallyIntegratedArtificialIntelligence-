@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ollama list *)",
+      "Bash(curl -s -m 5 http://localhost:11434/api/tags)",
+      "Bash(python aurora/main.py)",
+      "Bash(ls \"C:/Users/saart/.claude/projects/d--Visuals-AI/memory/\" 2>&1)",
+      "Read(//c/Users/saart/.claude/projects/d--Visuals-AI/memory/**)",
+      "Bash(python -c ' *)",
+      "Bash(rm -f LIA/aurora_memory.db)",
+      "Bash(python LIA/main.py)"
+    ]
+  }
+}

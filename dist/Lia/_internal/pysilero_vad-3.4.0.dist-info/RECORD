@@ -1,0 +1,17 @@
+bin/ggml-base.dll,sha256=aAlKUYAX46pINKTaT1qJ0_JWIWr8p852sWSQXXNqnxE,549376
+bin/ggml-cpu.dll,sha256=VgAQpM6BoW08PeNVTe627f6besk5z2tZBJTCyEtMUP0,641024
+bin/ggml.dll,sha256=Ld_UW2pFHYgdyds9OFEpM5Ie1gFeLexSDUaHS0tEmoI,68096
+pysilero_vad-3.4.0.dist-info/INSTALLER,sha256=zuuue4knoyJ-UwPPXg8fezS7VCrXJQrAP7zeNuwvFQg,4
+pysilero_vad-3.4.0.dist-info/METADATA,sha256=Zq9y5rzuSIRBKS-kHON-9_9THU2kFAiYbhujkzHLF4Y,1543
+pysilero_vad-3.4.0.dist-info/RECORD,,
+pysilero_vad-3.4.0.dist-info/REQUESTED,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0
+pysilero_vad-3.4.0.dist-info/WHEEL,sha256=q-1nm8OcKSwBrcW2s-l0xmMp1Mz7U-TQ53wqJblavq4,103
+pysilero_vad-3.4.0.dist-info/licenses/LICENSE.md,sha256=tbEqwtpQCbiW_sQSe9RyeEbq3H6p4EwnAtrEBzm1icE,1092
+pysilero_vad/__init__.py,sha256=KPi30LVd87PXezLgCP9RPFkCMgjWKwmHNOEVo1qDj4g,3181
+pysilero_vad/__pycache__/__init__.cpython-314.pyc,,
+pysilero_vad/ggml-base.dll,sha256=aAlKUYAX46pINKTaT1qJ0_JWIWr8p852sWSQXXNqnxE,549376
+pysilero_vad/ggml-cpu.dll,sha256=VgAQpM6BoW08PeNVTe627f6besk5z2tZBJTCyEtMUP0,641024
+pysilero_vad/ggml-silero-v6.2.0.bin,sha256=KqJpt4XutTqCmDogUB3ffB2cSOM6tjpBORrGyff7aYc,885098
+pysilero_vad/ggml.dll,sha256=Ld_UW2pFHYgdyds9OFEpM5Ie1gFeLexSDUaHS0tEmoI,68096
+pysilero_vad/py.typed,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0
+pysilero_vad/silero_vad.pyd,sha256=_ewcHYmtW8lcQ87FA_xNOZg0mwG76AstYzLLROB9nRs,53760

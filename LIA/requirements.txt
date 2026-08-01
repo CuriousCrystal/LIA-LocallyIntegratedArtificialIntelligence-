@@ -1,0 +1,15 @@
+requests>=2.31
+numpy>=1.26
+
+# --- voice: speaking ---
+piper-tts>=1.6        # local neural TTS, uses the voice files in voices/
+pyttsx3>=2.98         # fallback to the built-in Windows voice
+sounddevice>=0.5      # audio playback + microphone capture
+
+# --- voice: listening (optional, only needed with LISTEN_ENABLED) ---
+faster-whisper>=1.1   # speech recognition, runs on CPU to leave the GPU to Ollama
+pysilero-vad>=3.0     # voice activity detection for the open mic (onnx, no torch)
+
+# --- running as a background app ---
+pystray>=0.19         # system tray icon
+Pillow>=10.0          # draws the tray icon
