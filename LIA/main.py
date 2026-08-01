@@ -38,6 +38,7 @@ from config import (
     CONVERSATION_WINDOW_SECONDS,
     GREET_ON_START,
     LIBRARY_DIR,
+    LIBRARY_AUTO_READ,
     BARGE_IN,
     ECHO_MATCH_RATIO,
     BARGE_IN_MIN_WORDS,
@@ -134,7 +135,7 @@ def build_library_context(user_input: str) -> dict | None:
     }
 
 
-def sync_library(announce: bool = True) -> tuple[int, int]:
+def sync_library(announce: bool = True, quiet: bool = False) -> tuple[int, int]:
     """Index anything new in the library folder."""
     waiting = library.pending()
     if not waiting:
@@ -146,13 +147,39 @@ def sync_library(announce: bool = True) -> tuple[int, int]:
         print(f"[reading {names}{more} -- this takes a moment]")
 
     def progress(count):
-        status(f"reading, {count} passages so far")
+        if not quiet:
+            status(f"reading, {count} passages so far")
 
     files_done, chunks = library.sync(on_progress=progress)
-    clear_status()
+    if not quiet:
+        clear_status()
     if announce and chunks:
-        print(f"[read {files_done} file(s), {chunks} passages]\n")
+        print(f"[read {files_done} file(s), {chunks} passages]")
     return files_done, chunks
+
+
+def start_library_sync():
+    """Index new documents in the background.
+
+    A long PDF takes minutes to embed. Doing that before she'll say a word makes
+    her look broken on every restart, which is exactly how it looked.
+    """
+    waiting = library.pending()
+    if not waiting:
+        return
+
+    names = ", ".join(p.name for p in waiting[:2])
+    print(f"[reading {names} in the background -- she's available meanwhile]")
+
+    def run():
+        try:
+            files_done, chunks = sync_library(announce=False, quiet=True)
+            if chunks:
+                print(f"\n[finished reading {files_done} file(s), {chunks} passages]")
+        except requests.RequestException:
+            print("\n[couldn't reach Ollama to read the library -- try /library scan later]")
+
+    threading.Thread(target=run, daemon=True).start()
 
 
 def handle_command(cmd: str, speaker: voice.Speaker, state: dict) -> bool:
@@ -191,8 +218,12 @@ def handle_command(cmd: str, speaker: voice.Speaker, state: dict) -> bool:
             print("[wake word off -- she answers anything she hears]\n")
 
     elif name == "/library":
-        if arg in ("scan", "refresh", "reload"):
-            files_done, chunks = sync_library()
+        if arg in ("scan", "refresh", "reload", "read"):
+            try:
+                files_done, chunks = sync_library()
+            except requests.RequestException:
+                print("[couldn't reach Ollama -- try again in a moment]\n")
+                return True
             if not chunks:
                 print("[nothing new to read]\n")
         shelf = library.titles()
@@ -380,7 +411,11 @@ def read_input(
             if spoken:
                 meant_for_her = accept_spoken(spoken, state)
                 if meant_for_her:
+                    print(f"  heard: {spoken}")
                     return as_instruction(meant_for_her)
+                # Logged, because with no console this is the only way to tell
+                # "she can't hear me" from "she heard me and ignored it".
+                print(f'  [heard "{spoken}" -- say her name to get her attention]')
             if controls and controls.close_now.is_set():
                 return ""
         raise EOFError("stopped")
@@ -557,10 +592,20 @@ def main(controls: "Controls | None" = None):
         speaker.preload()
         print(f"[speaking with: {speaker.voice_name}]\n")
 
-    try:
-        sync_library()
-    except requests.RequestException:
-        print("[couldn't reach Ollama to read the library -- try /library scan later]\n")
+    if LIBRARY_AUTO_READ:
+        start_library_sync()
+    else:
+        waiting = library.pending()
+        if waiting:
+            names = ", ".join(p.name for p in waiting[:3])
+            print(f'[{len(waiting)} new file(s) waiting: {names}]')
+            print('[say "Lia, read my files" when you want her to]\n')
+
+    # Load the speech model before greeting, not after. Otherwise the greeting
+    # opens the conversation window while she's still deaf, and by the time she
+    # can hear you the window has closed and she ignores you.
+    if listener is not None and state["listening"]:
+        listener.warm_up()
 
     if GREET_ON_START:
         status("waking up")
@@ -573,9 +618,9 @@ def main(controls: "Controls | None" = None):
             print(f"LIA: {hello}\n")
             speaker.say(hello)
             speaker.wait()
-            # A greeting counts as her having spoken, so you can just answer it
-            # without having to say her name first.
-            state["last_reply_at"] = time.monotonic()
+            # Deliberately does NOT open the free-conversation window. She greets
+            # the room at login whether or not anyone is there, and without the
+            # wake word she'd answer the first stray noise she heard.
 
     pending_input: str | None = None
 
@@ -589,7 +634,9 @@ def main(controls: "Controls | None" = None):
         if controls is not None and controls.close_now.is_set():
             controls.close_now.clear()
             if close_out(session):
-                print("[closed out the conversation]")
+                print("[closed out the conversation -- diary written]")
+            else:
+                print("[nothing to write about yet -- talk to her first]")
 
         try:
             if pending_input:

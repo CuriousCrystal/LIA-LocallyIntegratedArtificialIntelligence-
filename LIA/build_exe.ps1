@@ -12,6 +12,15 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 Set-Location $root
 
+# A running Lia.exe locks its own files, so PyInstaller's --clean wipes the
+# folder, fails to write the new exe, and leaves you with no voices and no app.
+$running = Get-Process Lia -ErrorAction SilentlyContinue
+if ($running) {
+    Write-Host "Stopping the running Lia first..." -ForegroundColor Yellow
+    $running | Stop-Process -Force
+    Start-Sleep -Seconds 3
+}
+
 Write-Host "Building Lia..." -ForegroundColor Cyan
 
 $pyinstaller = @(

@@ -147,20 +147,32 @@ def files() -> list[Path]:
     )
 
 
+def _key(path: Path) -> str:
+    """Identify a document by its path *within* the library folder.
+
+    Absolute paths would make the index worthless the moment the folder moves --
+    running the packaged .exe re-read a whole PDF from scratch purely because it
+    lived under dist\\Lia\\library instead of LIA\\library.
+    """
+    try:
+        return path.resolve().relative_to(Path(LIBRARY_DIR).resolve()).as_posix()
+    except ValueError:
+        return path.name
+
+
 def pending() -> list[Path]:
     """Files that are new or have changed since they were indexed."""
     known = db.indexed_documents()
     out = []
     for path in files():
-        key = str(path.resolve())
-        if known.get(key) != path.stat().st_mtime:
+        if known.get(_key(path)) != path.stat().st_mtime:
             out.append(path)
     return out
 
 
 def ingest_file(path: Path, on_progress=None) -> int:
     """Index one file, replacing any previous version of it. Returns chunk count."""
-    key = str(path.resolve())
+    key = _key(path)
     db.forget_document(key)
 
     mtime = path.stat().st_mtime

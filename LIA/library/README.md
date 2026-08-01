@@ -1,11 +1,17 @@
 # Lia's library
 
-Put things here you want her to have read. She picks them up the next time she
-starts, or immediately with `/library scan`.
+A folder to hand her a document through.
+
+Working on something and want her to read it? Save it here and say **"Lia, read
+my files"** (or type `/library scan`). She reads it then, and not before.
+
+**She does not read this folder on her own**, and she never touches anything
+outside it. Nothing is scanned, indexed, or absorbed until you ask. A file
+sitting here is available to her, not already in her head.
 
 **Supported:** `.pdf`, `.txt`, `.md`
 
-Subfolders are fine — she looks all the way down.
+Subfolders are fine — she looks all the way down, but only when asked.
 
 ## How it works
 

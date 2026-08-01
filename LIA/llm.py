@@ -1,6 +1,7 @@
 import json
 import subprocess
 import time
+from pathlib import Path
 
 import requests
 
@@ -33,6 +34,11 @@ def wait_until_ready(total_seconds: float = 180, try_launch: bool = True) -> boo
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                # Start it somewhere neutral. Launched from inside a packaged
+                # app, Ollama's llama-server workers pick up DLLs out of the
+                # bundle's _internal folder and hold handles on them, which
+                # locks the app's own files for as long as a model is loaded.
+                cwd=str(Path.home()),
             )
         except Exception:
             pass  # not installed, or not on PATH -- fall through and keep waiting

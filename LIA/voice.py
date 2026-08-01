@@ -386,6 +386,10 @@ class Listener:
             return None
         return np.concatenate(frames, axis=0).flatten()
 
+    def warm_up(self) -> bool:
+        """Load the models now, so the first thing you say isn't missed."""
+        return self._ensure_model() and self._ensure_vad()
+
     def _ensure_vad(self) -> bool:
         if self._vad is not None:
             return True

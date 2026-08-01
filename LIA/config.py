@@ -112,8 +112,14 @@ MIC_SETTLE_SECONDS = 0.4
 PROTECTED_FACTS = {"name", "preferred_address"}
 
 # --- library ---
-# Drop PDFs, text or markdown in here and she'll read them. See library/README.md.
+# A folder you can hand her a document through. Put a PDF in here and ask her to
+# read it -- she never crawls your drive, and never reads anything you haven't
+# asked for. See library/README.md.
 LIBRARY_DIR = BASE_DIR / "library"
+
+# Read new files automatically on startup. Off: a document sitting in the folder
+# is just available, not absorbed. She reads it when you ask.
+LIBRARY_AUTO_READ = False
 
 # How many passages from your documents to pull in per turn. Kept smaller than
 # it could be: document text is long, and it competes with the conversation
@@ -172,6 +178,11 @@ SPOKEN_COMMANDS = {
     "/voice on": ["you can talk", "start talking", "unmute"],
     "/wake off": ["listen to everything"],
     "/wake on": ["only answer to your name"],
+    "/library scan": [
+        "read my files", "read my file", "read the file", "read the pdf",
+        "read my pdf", "read the new file", "read the new pdf",
+        "check the library", "read the document",
+    ],
 }
 
 # --- wake word ---
