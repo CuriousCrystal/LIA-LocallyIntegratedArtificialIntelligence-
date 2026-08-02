@@ -72,6 +72,18 @@ def init_db():
         )
     """)
 
+    # A single enrolled voiceprint, averaged in over each enrollment so it
+    # gets more representative rather than being overwritten. One row, always
+    # id=1 -- there's only ever one person she's trying to recognise.
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS voice_profile (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            embedding TEXT NOT NULL,
+            sample_count INTEGER NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -236,3 +248,31 @@ def cancel_all_alarms() -> int:
     n = cur.rowcount
     conn.close()
     return n
+
+
+def get_voice_profile() -> dict | None:
+    conn = get_conn()
+    row = conn.execute("SELECT embedding, sample_count FROM voice_profile WHERE id = 1").fetchone()
+    conn.close()
+    if row is None:
+        return None
+    return {"embedding": json.loads(row["embedding"]), "sample_count": row["sample_count"]}
+
+
+def save_voice_profile(embedding: list, sample_count: int):
+    conn = get_conn()
+    conn.execute(
+        """INSERT INTO voice_profile (id, embedding, sample_count, updated_at) VALUES (1, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET embedding=excluded.embedding,
+               sample_count=excluded.sample_count, updated_at=excluded.updated_at""",
+        (json.dumps(embedding), sample_count, now()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def clear_voice_profile():
+    conn = get_conn()
+    conn.execute("DELETE FROM voice_profile WHERE id = 1")
+    conn.commit()
+    conn.close()

@@ -187,6 +187,49 @@ MEDIA_TRIGGER_PHRASES = [
 # How many percentage points one "volume up"/"volume down" moves.
 VOLUME_STEP = 10
 
+# --- speaker recognition (optional) ---
+# A soft comfort signal, not a lock: this runs on a laptop microphone, not a
+# security device. It decides how at ease she is taking actions or sharing
+# personal facts -- never whether she'll talk to someone at all.
+SPEAKER_MODEL_PATH = BASE_DIR / "models" / "speaker_embedding.onnx"
+
+# Cosine similarity above which a voice counts as a match. Kept conservative
+# on purpose: a false "not recognised" just makes her a little more careful,
+# but a false "recognised" defeats the point. Verified only against synthetic
+# TTS voices during development (0.57-0.78 between different voices, 0.91-0.99
+# for the same voice) -- real accuracy on an actual microphone needs tuning
+# once there's real enrollment data, so this is deliberately easy to adjust.
+SPEAKER_MATCH_THRESHOLD = 0.75
+
+# How many times saying the identity phrase (see below) folds into the
+# enrolled profile before it's considered stable. Each one is averaged in,
+# not a replacement, so the profile gets more representative over time.
+SPEAKER_ENROLL_TARGET = 3
+
+# --- access gate ---
+# A harder line than voice matching alone: at the start of every session, if
+# you don't say "it's {name}" she asks for a passcode before acting on
+# anything. Get it right and she proceeds; get it wrong and she stops
+# listening outright, rather than a soft decline.
+#
+# Read from the environment, never hardcoded here -- the same reasoning as
+# GROQ_API_KEY: this file may end up in a public repo, and a passcode anyone
+# can read in the source isn't a passcode. Set it with:
+#   [Environment]::SetEnvironmentVariable('LIA_PASSCODE', 'your-word', 'User')
+# Left unset, the access gate quietly doesn't engage (see check_access_gate in
+# main.py) rather than locking you out with something that can never match.
+PASSCODE_UNLOCK = os.environ.get("LIA_PASSCODE", "")
+
+# Says this any time (no need to unlock first) and she reads out the tools
+# reference PDF instead of proceeding with anything else that turn.
+#
+# The PDF lives at ../docs/ in source, which doesn't exist next to the
+# packaged exe -- so a copy is kept in LIA/docs/ (bundled alongside voices/
+# and models/ by build_exe.ps1) and read from there instead. Keep that copy
+# in sync if "Lia - Tools We Used.pdf" is ever regenerated.
+PASSCODE_EXPLAIN = "DECODE"
+DECODE_DOCUMENT_PATH = BASE_DIR / "docs" / "Lia - Tools We Used.pdf"
+
 # --- library ---
 # A folder you can hand her a document through. Put a PDF in here and ask her to
 # read it -- she never crawls your drive, and never reads anything you haven't

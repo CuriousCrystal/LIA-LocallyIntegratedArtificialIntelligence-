@@ -74,6 +74,16 @@ def parse_request(text: str) -> tuple[dt.datetime, str] | None:
     return None
 
 
+def would_schedule(text: str) -> bool:
+    """True if this text would actually set an alarm, without setting one --
+    lets a caller decide whether to gate the action before schedule() commits
+    it to the database."""
+    lowered = text.lower()
+    if not any(w in lowered for w in _TRIGGER_WORDS):
+        return False
+    return parse_request(text) is not None
+
+
 def schedule(text: str) -> str | None:
     """Set an alarm from spoken text if it looks like one. Returns what to
     say to confirm it, or None if this wasn't actually an alarm request."""

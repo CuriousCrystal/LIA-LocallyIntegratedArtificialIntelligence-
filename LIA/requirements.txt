@@ -1,6 +1,9 @@
 requests>=2.31
 numpy>=1.26
 
+# --- library (reads PDFs dropped in library/, and DECODE reads its reference doc) ---
+pypdf>=4.0             # PDF text extraction
+
 # --- voice: speaking ---
 piper-tts>=1.6        # local neural TTS, uses the voice files in voices/
 pyttsx3>=2.98         # fallback to the built-in Windows voice
@@ -17,6 +20,10 @@ Pillow>=10.0          # draws the tray icon
 # --- media control (optional) ---
 winsdk>=1.0            # Windows System Media Transport Controls -- play/pause/skip
 pycaw>=20240210        # direct system volume control (Core Audio API)
+
+# --- speaker recognition (optional) ---
+# Needs a model file too -- see LIA/models/README.md
+sherpa-onnx>=1.13       # local speaker-embedding extraction (onnx, no torch, ~27MB)
 
 # --- internet (optional, off by default until GROQ_API_KEY is set) ---
 # no extra package -- internet.py uses requests, already listed above

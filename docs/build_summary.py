@@ -154,6 +154,75 @@ SUMMARIES = {
         "Windows path to eSpeak, a data path baked in from the CI machine that built it). Verified "
         "working end to end, but left the active voice on amy since that was already the "
         "confirmed choice."),
+    51: ("Asked for a new \"growth log\" PDF tracking capability stages (making her, file-path "
+        "reading, voices, and controlling actions as the current frontier) instead of a changelog "
+        "— and, separately, whether she can actually control playback, since she'd told him her "
+        "interactions were text-only.",
+        "Built the Growth Log and removed the old \"What We Built\" PDF as asked. On the "
+        "capability question, found the real cause: her system prompt never told her what she "
+        "could do, so she answered from generic assumptions instead of her actual abilities — "
+        "confirmed directly in his own session log, where she'd said almost exactly that. Fixed "
+        "the prompt, then built volume control as the natural next step. Tried simulating the "
+        "physical volume keys first; verified live that it silently did nothing. Switched to "
+        "talking to Windows' Core Audio API directly instead, verified working. Also caught and "
+        "fixed a real matching bug along the way: “unmute” was resolving to the wrong "
+        "command because character-level substring matching treated it as ending in “mute.”"),
+    52: ("Asked to keep the PDFs updated going forward without being asked each time, and raised "
+        "voice differentiation as a possible next step — asking for an opinion before any "
+        "changes.",
+        "Saved the standing instruction. Recommended treating voice recognition as a soft comfort "
+        "signal gating actions, not a hard lock — a laptop mic isn't reliable enough to bet "
+        "security on, and a false lockout is worse than not having the feature at all."),
+    53: ("Refined the idea: “hey Lia, it's Wade” as how she'd know him, and when she "
+        "doesn't recognise the voice, she should be uneasy and decline actions.",
+        "Agreed on the design and flagged two decisions before building: what “uneasy” "
+        "should actually sound like (a decline, not a hard refusal), and whether this should also "
+        "gate shared personal facts, not just actions."),
+    54: ("Confirmed: gate personal details too, not just actions.",
+        "Found a lightweight local model (3D-Speaker's CAM++ via sherpa-onnx, ~27MB, no PyTorch) "
+        "and downloaded it. Building and testing it honestly took real debugging: an early result "
+        "showed the enrolled voice scoring *worse* than a different one, traced through several "
+        "false leads (averaging logic, database contamination) before finding the actual causes — "
+        "Piper's TTS vocoder is stochastic by design, and a manual resampling step in the test "
+        "harness was corrupting the signal. With those isolated, the model showed real, "
+        "correctly-directioned discrimination, though weaker than expected — flagged clearly "
+        "that synthetic test voices likely understate real accuracy, and it can't be fully "
+        "verified without an actual human voice. Built enrollment (“it's Wade”, averaged "
+        "over repetitions), gated media/volume/alarm actions and personal facts behind a match, "
+        "and added <font face='Courier'>/whoami</font> so the threshold can be tuned against real "
+        "use rather than guessed at."),
+    55: ("Refined it further: a session-level passcode instead of a soft decline &mdash; "
+        "\"ENCODE\" if she doesn't hear the identity phrase first, and stop listening entirely on "
+        "a wrong answer. Separately, \"DECODE\" should have her explain the tools reference PDF.",
+        "Rebuilt around exactly this. Flagged plainly that plain-text passcodes in "
+        "<font face='Courier'>config.py</font> are visible to anyone if the repo is ever made "
+        "public, the same caution as the earlier key leak. DECODE reads the PDF's full text "
+        "directly rather than through the chunked library search, since \"explain the whole "
+        "thing\" doesn't fit that retrieval pattern. Found and fixed two real bugs while testing "
+        "live, not in theory: the new gate was intercepting \"bye\" before the exit check ever "
+        "ran, which combined with a separate bug (the keyboard reader spinning with no backoff "
+        "once stdin hit EOF) to produce a genuine infinite loop — over 600,000 identical lines in "
+        "under a minute. Also caught that saying the identity phrase and a request in one breath "
+        "(\"it's Wade, play some music\") silently lost the identity claim, because the "
+        "command-rewriting step ran before the gate ever saw the original words."),
+    56: ("Try again.", "Re-ran the interrupted step and finished verifying both fixes live."),
+    57: ("Flag the passcode.",
+        "Moved <font face='Courier'>PASSCODE_UNLOCK</font> to an environment variable "
+        "(<font face='Courier'>LIA_PASSCODE</font>), the same pattern as the API keys, since a "
+        "plaintext passcode in a possibly-public repo defeats its own purpose. Found a real edge "
+        "case while fixing it: an <i>unset</i> passcode would have locked Wade out with something "
+        "that could never be typed correctly &mdash; the gate now disables itself gracefully "
+        "instead, with a one-time log line saying so. Verified both the configured and "
+        "unconfigured cases live, and confirmed the fix didn't get recorded verbatim into git the "
+        "way the original key leak did."),
+    58: ("Checked in that everything was still working, and asked for the PDFs and "
+        "<font face='Courier'>requirements.txt</font> to be brought current.",
+        "Audited <font face='Courier'>requirements.txt</font> against every actual import in the "
+        "codebase (including the lazily-loaded ones inside functions, not just top-level) and "
+        "found a real gap: <font face='Courier'>pypdf</font> &mdash; used by the library reader "
+        "and now by DECODE too &mdash; had never been listed at all. A fresh install would have "
+        "been missing it silently until the first PDF was opened. Added it. This document, and "
+        "the rest."),
     43: ("Provided the OpenRouter key, confirmed amy as the voice, and asked for a latency "
         "check plus updated PDFs.",
         "Verified OpenRouter's live search with a real, current, cited answer a local or "
@@ -208,6 +277,7 @@ PHASES = {
     32: "Writing it down",
     38: "Connecting her to the world",
     45: "What daily use surfaced",
+    51: "Learning to recognise her",
 }
 
 
@@ -274,14 +344,20 @@ def main():
     story.append(callout(
         "A companion called Wade knows by name, that starts at login, greets him, listens on an "
         "open mic, answers out loud, remembers across days, reads what he hands her, sets real "
-        "alarms and timers, controls whatever's playing on the machine, and never sends a word off "
-        "it &mdash; except the one narrow, optional exception she'll admit to: weather, and a "
-        "question explicitly asked of the web. Twelve modules, single-instance protected, running "
-        "at roughly 4% of one core while idle instead of 290%.<br/><br/>"
+        "alarms and timers, controls whatever's playing and the system volume, recognises his "
+        "voice, and now gates every session behind either that or a spoken passcode &mdash; and "
+        "never sends a word off the machine except the one narrow, optional exception she'll "
+        "admit to: weather, and a question explicitly asked of the web. Thirteen modules, "
+        "single-instance protected, running at roughly 4% of one core while idle instead of "
+        "290%.<br/><br/>"
         "Still open: no way to forget, she still occasionally invents small details, fact keys "
-        "drift, and there are no tests &mdash; which matters, because the CPU issue, the parsing "
-        "bug in alarms, and the music confabulation were all silent until someone actually lived "
-        "with her and noticed."))
+        "drift, there are no tests, and voice recognition's real-world accuracy is honestly "
+        "unverified &mdash; tested only against synthetic voices, tunable via "
+        "<font face='Courier'>/whoami</font> once there's real data to tune it against. Two real "
+        "bugs (an access gate that could trap you in the conversation, an identity phrase silently "
+        "lost when combined with a request) were found only by actually running the thing, not by "
+        "reasoning about the code &mdash; the same lesson as the CPU issue and the alarm parsing "
+        "bug before it."))
 
     build(HERE / "Lia - Session Summary.pdf",
           "Lia — Session Summary",

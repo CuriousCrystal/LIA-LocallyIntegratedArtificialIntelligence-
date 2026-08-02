@@ -158,6 +158,48 @@ nothing, since a simulated key needs a focused window to land on:
 "mute" / "unmute"
 ```
 
+## Recognising your voice
+
+Say **"Lia, it's Wade"** a few times and she builds a voiceprint — a local model
+(3D-Speaker's CAM++, via `sherpa-onnx`, no PyTorch) compares later speech against
+it. This alone is a soft comfort signal, not a lock: a clear mismatch means she
+won't use your name and won't share what she remembers about you, but she never
+simply refuses to talk. The harder lock is the access gate below.
+
+`/whoami` shows enrollment progress and the last confidence score; `/whoami forget`
+clears the profile and starts over. **Real-world accuracy is unverified from
+development** — it was only tested against synthetic TTS voices, which likely
+*understates* how well it discriminates real human voices (see
+`speaker_id.py`'s docstring). `SPEAKER_MATCH_THRESHOLD` in `config.py` is a
+starting point, not a calibrated answer — expect to retune it once there's real
+usage data.
+
+## The access gate
+
+Every session starts locked. Say the identity phrase ("Lia, it's Wade") within
+the first exchange, or she asks for a spoken passcode instead of acting on
+anything. Get it right and the session unlocks for good; get it wrong and she
+**stops listening entirely** — recoverable only by hand (the tray menu, or typing
+`/mic on`), deliberately not by voice, or the lock would be trivial to talk past.
+
+The passcode is read from an environment variable, the same pattern as the API
+keys — never hardcoded in `config.py`, since that file may end up in a public
+repo:
+
+```powershell
+[Environment]::SetEnvironmentVariable('LIA_PASSCODE', 'your-word', 'User')
+```
+
+**Left unset, the gate quietly doesn't engage** — every session is treated as
+already unlocked, with a one-time log line saying so, rather than locking you
+out with a passcode that can never be typed correctly.
+
+A second, separate phrase — set in `config.py` as `PASSCODE_EXPLAIN` — works
+independently of the gate, any time, unlocked or not: say it and she reads out
+and explains `LIA/docs/Lia - Tools We Used.pdf` in her own words. It doesn't
+grant access to anything, so it stays a plain constant rather than an
+environment variable.
+
 ## How she remembers
 
 Three layers, all in `lia_memory.db` (plain SQLite, in the project root — inspect
@@ -188,9 +230,12 @@ she'd never learn anything.
 | `app.py` | tray app wrapper for running her in the background |
 | `library.py` | reads PDFs and notes you drop in `library/` |
 | `internet.py` | the one deliberate offline exception — weather, and online lookups |
-| `media.py` | Windows media control (SMTC) — play/pause/skip/now playing |
+| `media.py` | Windows media control (SMTC) and volume (Core Audio) |
+| `alarms.py` | spoken alarms and timers — regex-parsed, never guessed by the model |
+| `speaker_id.py` | voice recognition — is this the enrolled voice or not |
 | `voices/` | drop your own voice files here — see `voices/README.md` |
 | `library/` | drop PDFs here — see `library/README.md` |
+| `models/` | the speaker-recognition model — see `models/README.md` |
 
 ## Tuning
 

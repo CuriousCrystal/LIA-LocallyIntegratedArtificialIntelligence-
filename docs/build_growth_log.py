@@ -103,6 +103,43 @@ A(P("A real gap surfaced during this stage: she had no idea any of this existed.
     "Fixed by adding an explicit, honest capability list to her own system prompt, so she reports "
     "what she can and can't do accurately instead of guessing."))
 
+A(H2("Knowing who's asking: voice recognition"))
+A(P("If actions are the risk this stage introduced, this is the safeguard for it. Say "
+    "“Lia, it's Wade” a few times and she builds a voiceprint — a local model (3D-Speaker's "
+    "CAM++, run through <font face='Courier'>sherpa-onnx</font>, no PyTorch) compares later speech "
+    "against it. Where a clear mismatch doesn't grant a hard lock, it withholds the things that "
+    "matter: she won't use your name, and won't share what she remembers about you."))
+A(callout("<b>Honestly unverified:</b> real-world accuracy could only be tested against synthetic "
+          "TTS voices from here, not an actual human voice on an actual microphone. The signal was "
+          "confirmed real and correctly directioned, but likely <i>understates</i> true accuracy — "
+          "synthetic speech probably lacks some of the natural acoustic texture the model was "
+          "trained on. The match threshold is a documented starting point, not a calibrated answer, "
+          "and <font face='Courier'>/whoami</font> exists specifically so it can be tuned against "
+          "real use."))
+
+A(H2("A harder gate: a spoken passcode"))
+A(P("Voice recognition alone is a soft signal — useful, but not something to bet real access on "
+    "given a laptop mic's reliability. So every session now opens locked: say the identity phrase "
+    "within the first exchange, or she asks for a spoken passcode instead of acting on anything. "
+    "Get it right and the session opens for good; get it wrong and she stops listening outright, "
+    "recoverable only by hand (the tray menu, or typing it back on) — deliberately not "
+    "recoverable by voice, since that would make the lock trivial to talk past."))
+A(P("A second, separate passcode does something rather than unlocking anything: said at any time, "
+    "unlocked or not, it has her read out and explain a specific reference document in her own "
+    "words. Knowing the word is the point, the same as the first passcode.", "LiaNote"))
+A(callout("<b>Two real bugs, found only by running it, not by reading the code:</b> the gate was "
+          "checked before the “end the session” check, so once locked, saying goodbye "
+          "got treated as a passcode guess instead of exiting — which combined with a second, "
+          "unrelated bug (the keyboard reader spinning with no backoff once input ran out) into a "
+          "genuine infinite loop, over 600,000 identical lines in under a minute. Separately, "
+          "saying the identity phrase and a request in the same breath (“it's Wade, play some "
+          "music”) silently dropped the identity phrase, because the request got rewritten into a "
+          "command before the gate ever saw the original words. Both fixed and reverified live."))
+A(P("The unlock passcode itself moved to an environment variable shortly after, the same reasoning "
+    "as the API keys — a plaintext passcode in a file that might end up in a public repo isn't "
+    "one. Left unset, the gate now disables itself with a one-time log line rather than locking "
+    "anyone out with a word that could never be typed correctly.", "LiaNote"))
+
 A(H2("Not yet built"))
 A(bullets([
     "Opening or closing applications.",
@@ -110,10 +147,10 @@ A(bullets([
     "Browsing the web or clicking anything on your behalf.",
     "Any action on Linux or macOS — everything in this stage is Windows-specific so far.",
 ]))
-A(callout("<b>Where this goes next</b> is genuinely open. The pattern that's worked twice now — "
-          "find the narrowest real OS API for a specific action (SMTC for media, Core Audio for "
-          "volume) rather than reaching for something broad and risky — is the one to keep "
-          "following as this stage grows."))
+A(callout("<b>Where this goes next</b> is genuinely open. The pattern that's worked a few times now — "
+          "find the narrowest real API for a specific capability (SMTC for media, Core Audio for "
+          "volume, a local speaker-embedding model for identity) rather than reaching for something "
+          "broad and risky — is the one to keep following as this stage grows."))
 
 build(HERE / "Lia - Growth Log.pdf",
       "Lia — Growth Log",

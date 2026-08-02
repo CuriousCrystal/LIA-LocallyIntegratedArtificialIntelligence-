@@ -39,6 +39,7 @@ $pyinstaller = @(
     '--collect-all', 'soundfile',
     '--collect-all', 'winsdk',          # Windows media control (SMTC)
     '--collect-all', 'pycaw',           # system volume control (Core Audio)
+    '--collect-all', 'sherpa_onnx',     # speaker recognition
     '--hidden-import', 'pystray._win32',
     '--hidden-import', 'comtypes',
     '--paths', 'LIA',
@@ -56,6 +57,15 @@ if (-not (Test-Path (Join-Path $new 'Lia.exe'))) {
 # Voices live beside the exe so you can drop your own in without rebuilding.
 $voicesSrc = Join-Path $PSScriptRoot 'voices'
 if (Test-Path $voicesSrc) { Copy-Item $voicesSrc (Join-Path $new 'voices') -Recurse -Force }
+
+# The speaker-recognition model, likewise -- not part of the PyInstaller
+# analysis since it's data, not code.
+$modelsSrc = Join-Path $PSScriptRoot 'models'
+if (Test-Path $modelsSrc) { Copy-Item $modelsSrc (Join-Path $new 'models') -Recurse -Force }
+
+# The tools-reference PDF, for the "DECODE" passcode to read from.
+$docsSrc = Join-Path $PSScriptRoot 'docs'
+if (Test-Path $docsSrc) { Copy-Item $docsSrc (Join-Path $new 'docs') -Recurse -Force }
 
 # Carry across whatever the live app already had, so nothing you've added or
 # said is lost in the swap.

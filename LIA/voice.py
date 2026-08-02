@@ -349,6 +349,11 @@ class Listener:
         self.model_size = model_size
         self._model = None
         self._vad = None
+        # The raw int16 samples behind the most recent transcription -- a
+        # side channel rather than a return-value change, since changing
+        # listen_open()/listen() to return tuples would touch every call site.
+        # speaker_id needs the actual audio, not just the words Whisper heard.
+        self.last_audio = None
 
     def _ensure_model(self) -> bool:
         if self._model is not None:
@@ -488,6 +493,7 @@ class Listener:
 
         if reason != "speech" or audio is None:
             return None
+        self.last_audio = audio
         return self._transcribe(audio, hint)
 
     def listen(self, hint: str | None = None) -> str | None:
@@ -508,6 +514,7 @@ class Listener:
         if audio is None or len(audio) < SAMPLE_RATE_IN // 4:
             return None
 
+        self.last_audio = audio
         return self._transcribe(audio, hint)
 
     def _transcribe(self, audio, hint: str | None) -> str | None:

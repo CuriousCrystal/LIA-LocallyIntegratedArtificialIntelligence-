@@ -16,6 +16,10 @@ __pycache__/
 # Logs.
 *.log
 
+# Downloadable models -- large binaries, re-fetched via LIA/models/README.md
+# and LIA/voices/README.md rather than committed.
+LIA/models/*.onnx
+
 # API keys, if you ever put one in a file instead of an environment variable.
 .env
 .env.*
