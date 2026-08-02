@@ -1,0 +1,21 @@
+# Claude Code's own local state -- settings.json/settings.local.json can end
+# up recording literal command strings (including secrets passed as CLI args)
+# in their permission-allowlist entries. Never publish this folder.
+.claude/
+
+# Lia's memory -- personal conversation history, not project source.
+*.db
+
+# Build output -- large, regenerable, platform-specific.
+build/
+dist/
+__pycache__/
+*.pyc
+*.spec
+
+# Logs.
+*.log
+
+# API keys, if you ever put one in a file instead of an environment variable.
+.env
+.env.*

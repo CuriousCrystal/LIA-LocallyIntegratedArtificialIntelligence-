@@ -1,3 +1,4 @@
+import ctypes
 import queue
 import re
 import sys
@@ -678,7 +679,37 @@ def end_session(session_id: str, short_term: list[dict]):
         print(f"[remembered: {', '.join(facts.keys())}]")
 
 
+_SINGLE_INSTANCE_MUTEX = "Global\\Lia_Companion_SingleInstance"
+_ERROR_ALREADY_EXISTS = 183
+
+# Kept alive for the life of the process -- letting this be garbage collected
+# doesn't close the underlying OS handle (ctypes HANDLEs aren't finalized by
+# Python), but naming it makes the intent obvious rather than relying on that.
+_instance_lock = None
+
+
+def _already_running() -> bool:
+    """True if another Lia is already running.
+
+    She'd otherwise start twice if launched by hand while the autostart copy
+    is still up -- two processes fighting over the same microphone and
+    speakers, two tray icons for one companion. A Windows mutex is released
+    automatically if the process dies or crashes, so a bad shutdown can never
+    leave a stale lock behind.
+    """
+    global _instance_lock
+    try:
+        _instance_lock = ctypes.windll.kernel32.CreateMutexW(None, False, _SINGLE_INSTANCE_MUTEX)
+        return ctypes.windll.kernel32.GetLastError() == _ERROR_ALREADY_EXISTS
+    except (AttributeError, OSError):
+        return False  # not on Windows, or the call failed -- don't block startup over it
+
+
 def main(controls: "Controls | None" = None):
+    if _already_running():
+        print("[Lia is already running -- check your system tray, or Task Manager for a Lia.exe process]")
+        return
+
     db.init_db()
     session = Session()
     headless = bool(controls and controls.headless)
