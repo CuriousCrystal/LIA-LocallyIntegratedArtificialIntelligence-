@@ -1,11 +1,19 @@
 """
-Controls whatever is currently playing on Windows.
+Controls whatever is currently playing on Windows, and the system volume.
 
-Uses Windows' own System Media Transport Controls (SMTC) -- the same system
-behind the media flyout next to the volume icon, and your keyboard's media
-keys. That means this works with whatever app actually has something playing
-(Spotify, a browser tab, Windows Media Player, the Movies & TV app) without
-Lia needing to know or care which one it is.
+Playback uses Windows' own System Media Transport Controls (SMTC) -- the same
+system behind the media flyout next to the volume icon, and your keyboard's
+media keys. That means it works with whatever app actually has something
+playing (Spotify, a browser tab, Windows Media Player) without Lia needing to
+know or care which one it is. It is a remote control, not a jukebox -- it
+cannot start a track from nothing if no app has anything loaded.
+
+Volume is separate: the Windows Core Audio API (via pycaw), talking to the
+system's master volume directly. Simulating the physical volume-up/down key
+presses was tried first and rejected -- verified live that it silently did
+nothing (volume unchanged, no error raised), almost certainly because a
+simulated key needs a foregrounded window to route to. Setting the level
+directly has no such dependency.
 
 Entirely local -- nothing here touches the internet. If nothing is playing, or
 there's no active media session, every function fails quietly and returns None
@@ -25,9 +33,64 @@ try:
 except ImportError:
     _AVAILABLE = False
 
+try:
+    from pycaw.pycaw import AudioUtilities as _AudioUtilities
+    _VOLUME_AVAILABLE = True
+except ImportError:
+    _VOLUME_AVAILABLE = False
+
 
 def available() -> bool:
     return _AVAILABLE
+
+
+def volume_available() -> bool:
+    return _VOLUME_AVAILABLE
+
+
+def _volume_endpoint():
+    return _AudioUtilities.GetSpeakers().EndpointVolume
+
+
+def get_volume() -> int | None:
+    """Current system volume, 0-100, or None if unavailable."""
+    if not _VOLUME_AVAILABLE:
+        return None
+    try:
+        return round(_volume_endpoint().GetMasterVolumeLevelScalar() * 100)
+    except Exception:
+        return None
+
+
+def set_volume(percent: int) -> bool:
+    """Set system volume directly to an exact 0-100 level."""
+    if not _VOLUME_AVAILABLE:
+        return False
+    try:
+        level = max(0, min(100, percent)) / 100
+        _volume_endpoint().SetMasterVolumeLevelScalar(level, None)
+        return True
+    except Exception:
+        return False
+
+
+def adjust_volume(delta_percent: int) -> int | None:
+    """Move the volume up or down by delta_percent, returning the new level."""
+    current = get_volume()
+    if current is None:
+        return None
+    new_level = max(0, min(100, current + delta_percent))
+    return new_level if set_volume(new_level) else None
+
+
+def mute(should_mute: bool = True) -> bool:
+    if not _VOLUME_AVAILABLE:
+        return False
+    try:
+        _volume_endpoint().SetMute(should_mute, None)
+        return True
+    except Exception:
+        return False
 
 
 def _run(coro):

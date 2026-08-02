@@ -67,6 +67,7 @@ from config import (
     WEATHER_TRIGGER_WORDS,
     INTERNET_TRIGGER_PHRASES,
     MEDIA_TRIGGER_PHRASES,
+    VOLUME_STEP,
 )
 
 HELP = """
@@ -75,6 +76,7 @@ HELP = """
   /openmic on|off open mic (just talk) vs push-to-talk (Enter to record)
   /wake on|off    only answer when you say her name
   /media play|pause|next|previous   control whatever's playing on Windows
+  /volume up|down|mute|unmute       adjust the system volume
   /alarms [cancel]                  list pending alarms/timers, or clear them
   /library [scan] what she has read; 'scan' picks up new files
   /voices         list voices found in LIA/voices/
@@ -373,6 +375,35 @@ def handle_command(cmd: str, speaker: voice.Speaker, state: dict) -> bool:
             else:
                 print("[nothing seems to be playing]\n")
 
+    elif name == "/volume":
+        if not media.volume_available():
+            print("[volume control isn't available -- see LIA/media.py]\n")
+        elif arg == "up":
+            new_level = media.adjust_volume(VOLUME_STEP)
+            if new_level is not None:
+                print(f"[volume: {new_level}%]\n")
+                speaker.say(f"Volume's at {new_level} percent.")
+            else:
+                print("[couldn't change the volume]\n")
+        elif arg == "down":
+            new_level = media.adjust_volume(-VOLUME_STEP)
+            if new_level is not None:
+                print(f"[volume: {new_level}%]\n")
+                speaker.say(f"Volume's at {new_level} percent.")
+            else:
+                print("[couldn't change the volume]\n")
+        elif arg == "mute":
+            outcome = media.mute(True)
+            print("[muted]\n" if outcome else "[couldn't mute]\n")
+            speaker.say("Muted." if outcome else "I couldn't mute that.")
+        elif arg == "unmute":
+            outcome = media.mute(False)
+            print("[unmuted]\n" if outcome else "[couldn't unmute]\n")
+            speaker.say("Unmuted." if outcome else "I couldn't unmute that.")
+        else:
+            level = media.get_volume()
+            print(f"[volume: {level}%]\n" if level is not None else "[couldn't read the volume]\n")
+
     elif name == "/library":
         if arg in ("scan", "refresh", "reload", "read"):
             try:
@@ -472,13 +503,21 @@ def spoken_command(text: str) -> str | None:
     muses about.
     """
     cleaned = re.sub(r"[^a-z\s]", "", text.lower()).strip()
-    cleaned = " ".join(cleaned.split())
-    if not cleaned or len(cleaned.split()) > 6:
+    words = cleaned.split()
+    if not words or len(words) > 6:
         return None
 
     for command, phrases in SPOKEN_COMMANDS.items():
         for phrase in phrases:
-            if cleaned == phrase or cleaned.startswith(phrase) or cleaned.endswith(phrase):
+            # Word-boundary matching, not character-substring: "unmute" must
+            # never match a phrase like "mute" just because the characters
+            # happen to appear at the end of the word. A prior version of
+            # this used cleaned.endswith(phrase) on raw strings, and "unmute"
+            # matched "mute" every time -- found by testing "unmute" and
+            # getting "/volume mute" back instead of "/volume unmute".
+            phrase_words = phrase.split()
+            n = len(phrase_words)
+            if words == phrase_words or words[:n] == phrase_words or words[-n:] == phrase_words:
                 return command
     return None
 

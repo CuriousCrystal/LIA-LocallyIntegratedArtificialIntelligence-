@@ -184,6 +184,9 @@ MEDIA_TRIGGER_PHRASES = [
     "what is this song", "what track is this",
 ]
 
+# How many percentage points one "volume up"/"volume down" moves.
+VOLUME_STEP = 10
+
 # --- library ---
 # A folder you can hand her a document through. Put a PDF in here and ask her to
 # read it -- she never crawls your drive, and never reads anything you haven't
@@ -248,7 +251,9 @@ SPOKEN_COMMANDS = {
     "/mic off": ["stop listening", "stop hearing me", "go to sleep", "sleep now", "mic off"],
     "/mic on": ["start listening", "wake up", "you can listen", "mic on"],
     "/voice off": ["stop talking", "be quiet", "quiet please", "hush", "mute yourself"],
-    "/voice on": ["you can talk", "start talking", "unmute"],
+    # Bare "unmute" deliberately excluded -- it now means the system volume
+    # (see "/volume unmute" below), which is the more common everyday sense.
+    "/voice on": ["you can talk", "start talking", "unmute yourself"],
     "/wake off": ["listen to everything"],
     "/wake on": ["only answer to your name"],
     "/media play": [
@@ -268,6 +273,16 @@ SPOKEN_COMMANDS = {
         "previous song", "go back a song", "last song", "previous track",
         "go back to the last song",
     ],
+    "/volume up": [
+        "volume up", "turn it up", "turn the volume up", "louder", "make it louder",
+        "can you turn it up",
+    ],
+    "/volume down": [
+        "volume down", "turn it down", "turn the volume down", "quieter", "make it quieter",
+        "can you turn it down", "lower the volume",
+    ],
+    "/volume mute": ["mute", "mute it", "mute the volume", "can you mute that"],
+    "/volume unmute": ["unmute", "unmute it", "unmute the volume"],
     "/library scan": [
         "read my files", "read my file", "read the file", "read the pdf",
         "read my pdf", "read the new file", "read the new pdf",
@@ -321,6 +336,18 @@ Never invent memories or facts about the person that weren't actually shared wit
 
 You may be given "Things I remember about you" below. Use it naturally, the way a friend
 would recall something, not like you're reading from a file.
+
+You have a few real abilities beyond talking, and this list is the actual truth about
+you -- if asked what you can do, answer from here, not from what a typical text-based
+assistant would guess about itself:
+- Play, pause, or skip whatever is already playing on their computer, and turn the
+  system volume up, down, or mute it. You cannot start a song from nothing, or choose
+  what plays -- only control something already running somewhere.
+- Set alarms and timers that genuinely go off later, even if the conversation has moved on.
+- If they ask, check the weather, or look up a factual question online.
+You cannot open other applications, browse the web yourself, or click anything on
+their screen. Never say you're "just text-based" -- you're not; say plainly which of
+the above you can or can't do instead.
 """
 
 # Used when generating a diary entry at the end of a session.

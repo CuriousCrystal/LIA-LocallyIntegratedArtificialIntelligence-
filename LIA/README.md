@@ -141,11 +141,21 @@ already. It's the fallback, or the option if that's the only key you have.
 **Music** needs nothing at all — it uses Windows' own System Media Transport
 Controls, the same thing behind your keyboard's media keys, so it works with
 whatever's actually playing (Spotify, a browser tab, Windows Media Player)
-without her needing to know which:
+without her needing to know which. It's a remote, not a jukebox — it can't
+start a track from nothing, and she'll say so honestly rather than guess:
 
 ```
 "play music" / "pause music" / "next song" / "previous song"
 "what song is this" / "what's playing"
+```
+
+**Volume** talks to Windows' Core Audio API directly (via `pycaw`), not to a
+simulated key press — that was tried first and verified to silently do
+nothing, since a simulated key needs a focused window to land on:
+
+```
+"volume up" / "turn it up" / "volume down" / "turn it down"
+"mute" / "unmute"
 ```
 
 ## How she remembers
