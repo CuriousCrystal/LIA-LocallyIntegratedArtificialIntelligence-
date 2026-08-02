@@ -16,7 +16,9 @@
       "Bash(python -m pip install --quiet pyinstaller)",
       "PowerShell(powershell -ExecutionPolicy Bypass -File \"d:\\\\Visuals\\\\AI\\\\LIA\\\\build_exe.ps1\" 2>&1 | Select-Object -Last 30)",
       "PowerShell(Set-Location \"d:\\\\Visuals\\\\AI\"; powershell -ExecutionPolicy Bypass -File \"LIA\\\\build_exe.ps1\" 2>&1 | Select-Object -Last 4; Write-Host \"=== size ===\"; \"{0:N0} MB\" -f \\(\\(Get-ChildItem \"dist\\\\Lia\" -Recurse | Measure-Object -Property Length -Sum\\).Sum / 1MB\\))",
-      "PowerShell(Set-Location \"d:\\\\Visuals\\\\AI\\\\dist\\\\Lia\"; if \\(Test-Path lia.log\\) { Remove-Item lia.log }; $p = Start-Process -FilePath \".\\\\Lia.exe\" -PassThru; Start-Sleep -Seconds 55; if \\(-not $p.HasExited\\) { Write-Host \"STILL RUNNING \\(good\\)\"; Stop-Process -Id $p.Id -Force } else { Write-Host \"EXITED early, code=$\\($p.ExitCode\\)\" }; Write-Host \"=== lia.log ===\"; if \\(Test-Path lia.log\\) { Get-Content lia.log } else { Write-Host \"\\(no log written\\)\" })"
+      "PowerShell(Set-Location \"d:\\\\Visuals\\\\AI\\\\dist\\\\Lia\"; if \\(Test-Path lia.log\\) { Remove-Item lia.log }; $p = Start-Process -FilePath \".\\\\Lia.exe\" -PassThru; Start-Sleep -Seconds 55; if \\(-not $p.HasExited\\) { Write-Host \"STILL RUNNING \\(good\\)\"; Stop-Process -Id $p.Id -Force } else { Write-Host \"EXITED early, code=$\\($p.ExitCode\\)\" }; Write-Host \"=== lia.log ===\"; if \\(Test-Path lia.log\\) { Get-Content lia.log } else { Write-Host \"\\(no log written\\)\" })",
+      "Bash(python build_transcript.py)",
+      "Bash(python build_summary.py)"
     ]
   }
 }
