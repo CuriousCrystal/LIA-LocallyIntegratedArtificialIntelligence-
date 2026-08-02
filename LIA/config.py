@@ -102,16 +102,8 @@ VOICE_NOISE_W = 0.8
 SYSTEM_VOICE_MATCH = "Zira"
 
 # Which engine speaks. "piper" is the one VOICE_NAME/VOICES_DIR above apply to.
-# "kitten" is a second, distinct local engine -- KittenTTS, CPU-only, its own
-# voices (Bella, Jasper, Luna, Bruno, Rosie, Hugo, Kiki, Leo) -- with its own
-# VOICE_NAME meaning down below. "system" forces the Windows fallback.
+# "system" forces the Windows fallback.
 VOICE_ENGINE = "piper"
-
-# Only read when VOICE_ENGINE = "kitten". One of the names above; anything
-# else falls back to Bella. First use downloads the model from Hugging Face
-# (~80MB for "mini", cached afterwards).
-KITTEN_VOICE_NAME = "Bella"
-KITTEN_MODEL = "KittenML/kitten-tts-mini-0.8"
 
 # Open mic: she listens continuously and answers when you stop talking, instead
 # of waiting for you to press Enter. Set False to go back to push-to-talk.
@@ -164,11 +156,14 @@ OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = "openai/gpt-4o-mini"
 OPENROUTER_ONLINE = True
 
-# Say any of these and, if she's online, she answers from Groq instead of
-# guessing from what a 3B local model already knows.
+# Say any of these and, if she's online, she answers from a real search
+# (OpenRouter's :online mode, or Groq as a fallback) instead of guessing from
+# what a 3B local model already knows.
 INTERNET_TRIGGER_PHRASES = [
-    "look that up", "look this up", "look it up", "search online",
-    "search the internet", "check online", "google that", "google it",
+    "look that up", "look this up", "look it up", "look up",
+    "search online", "search the internet", "check online",
+    "check the internet", "google that", "google it", "search for",
+    "can you search", "what's the latest",
 ]
 
 # Weather is answered from a live source directly -- Open-Meteo, no API key
@@ -256,10 +251,23 @@ SPOKEN_COMMANDS = {
     "/voice on": ["you can talk", "start talking", "unmute"],
     "/wake off": ["listen to everything"],
     "/wake on": ["only answer to your name"],
-    "/media play": ["play music", "play the music", "resume music", "resume the music", "play song"],
-    "/media pause": ["pause music", "pause the music", "stop the music", "stop music"],
-    "/media next": ["next song", "skip song", "skip this song", "play the next song", "next track"],
-    "/media previous": ["previous song", "go back a song", "last song", "previous track"],
+    "/media play": [
+        "play music", "play the music", "resume music", "resume the music", "play song",
+        "play some music", "can you play music", "can you play some music", "put on some music",
+        "put on music", "play a song",
+    ],
+    "/media pause": [
+        "pause music", "pause the music", "stop the music", "stop music",
+        "can you pause the music", "pause that",
+    ],
+    "/media next": [
+        "next song", "skip song", "skip this song", "play the next song", "next track",
+        "skip to the next song", "can you skip this",
+    ],
+    "/media previous": [
+        "previous song", "go back a song", "last song", "previous track",
+        "go back to the last song",
+    ],
     "/library scan": [
         "read my files", "read my file", "read the file", "read the pdf",
         "read my pdf", "read the new file", "read the new pdf",

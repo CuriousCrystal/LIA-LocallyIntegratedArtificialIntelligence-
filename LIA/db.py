@@ -59,6 +59,19 @@ def init_db():
     """)
     cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_path ON documents(path)")
 
+    # Spoken alarms and timers -- stored so one survives a restart: set "wake
+    # me up at 7am" before closing the laptop, and it still fires the next
+    # time she's running, even if that's a fresh process.
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS alarms (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fire_at TEXT NOT NULL,
+            label TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            fired INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -175,3 +188,51 @@ def recent_diary_entries(limit: int = 5):
     ).fetchall()
     conn.close()
     return rows
+
+
+def insert_alarm(fire_at: str, label: str) -> int:
+    conn = get_conn()
+    cur = conn.execute(
+        "INSERT INTO alarms (fire_at, label, created_at, fired) VALUES (?, ?, ?, 0)",
+        (fire_at, label, now()),
+    )
+    conn.commit()
+    alarm_id = cur.lastrowid
+    conn.close()
+    return alarm_id
+
+
+def due_alarms(now_iso: str):
+    """Unfired alarms whose time has come."""
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT id, fire_at, label FROM alarms WHERE fired = 0 AND fire_at <= ?", (now_iso,)
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+def mark_alarm_fired(alarm_id: int):
+    conn = get_conn()
+    conn.execute("UPDATE alarms SET fired = 1 WHERE id = ?", (alarm_id,))
+    conn.commit()
+    conn.close()
+
+
+def pending_alarms():
+    """Unfired alarms, soonest first."""
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT id, fire_at, label FROM alarms WHERE fired = 0 ORDER BY fire_at"
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+def cancel_all_alarms() -> int:
+    conn = get_conn()
+    cur = conn.execute("UPDATE alarms SET fired = 1 WHERE fired = 0")
+    conn.commit()
+    n = cur.rowcount
+    conn.close()
+    return n

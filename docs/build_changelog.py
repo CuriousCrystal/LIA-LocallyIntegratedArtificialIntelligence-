@@ -38,6 +38,9 @@ A(table([
     ["memory.py", "Embedding, retrieval, fact extraction and sanitising"],
     ["diary.py", "End-of-session reflection, and the startup greeting"],
     ["library.py", "Reads PDFs and notes you hand her"],
+    ["internet.py", "The one deliberate offline exception — weather, online lookups"],
+    ["media.py", "Windows media control (SMTC) — play/pause/skip/now playing"],
+    ["alarms.py", "Spoken alarms and timers — regex-parsed, never guessed by the model"],
     ["voice.py", "Speech out, speech in, voice detection, wake word"],
     ["main.py", "The conversation loop and session lifecycle"],
     ["app.py", "Tray app wrapper for running her in the background"],
@@ -254,25 +257,87 @@ A(P("Built against System Media Transport Controls &mdash; the same system behin
     "works with whatever is actually playing (Spotify, a browser tab, Windows Media Player) without "
     "Lia needing to know which. Verified against a real, live session already running on the machine."))
 
-A(H2("A second voice engine: KittenTTS"))
-A(P("Investigating a set of voice model files (KittenTTS, CPU-only, 25\u201380MB, its own voice set "
-    "including \u201cBella\u201d) surfaced three separate upstream packaging bugs before it worked at all:"))
-A(bullets([
-    "The released wheel's own metadata demands a dependency version that doesn't exist on PyPI "
-    "(<font face='Courier'>misaki&gt;=0.9.4</font>, latest published is 0.7.4) &mdash; worked around with "
-    "<font face='Courier'>--no-deps</font> plus installing the real dependencies by hand.",
-    "That dependency hardcodes a Windows path to a system-wide eSpeak install "
-    "(<font face='Courier'>C:\\Program Files\\eSpeak NG\\...</font>) that essentially nobody has, and never "
-    "checks the package that already bundles a working copy.",
-    "That bundled copy's own data directory path is baked in from the CI machine that built it "
-    "&mdash; also wrong on this machine.",
-]))
-A(P("Both path issues were fixed by pointing the phonemizer's library loader at the real bundled "
-    "files directly. Verified working end to end &mdash; audio played through real speakers, then "
-    "through the full sentence-chunked conversation loop. Left inactive by default: the confirmed "
-    "voice preference (Piper's \u201camy\u201d) was not switched without being asked to."))
+A(H2("A second voice engine: tried, then removed"))
+A(P("A set of voice model files (KittenTTS, CPU-only, 25–80MB, its own voice set including "
+    "“Bella”) was investigated, got working end to end after fixing three separate "
+    "upstream packaging bugs (a dependency version that doesn't exist on PyPI, a hardcoded Windows "
+    "path to a system eSpeak install, a data path baked in from the CI machine that built it) "
+    "&mdash; and was then removed entirely by request. The active voice stayed on Piper's "
+    "“amy” throughout; it was never switched without being asked to."))
 
 A(PageBreak())
+
+# --------------------------------------------------------- living with her ---
+A(H1("What actually living with her surfaced"))
+A(P("All of this came from real use after the build, not from further testing in isolation "
+    "&mdash; the kind of thing that only shows up once someone is actually relying on her day to "
+    "day."))
+
+A(H2("The CPU discovery"))
+A(P("Reported as “over 50% CPU, competing with other work.” Measured directly on the "
+    "running process before touching anything:"))
+A(table([
+    ["", "CPU (one core = 100%)"],
+    ["Idle, before the fix", "~290%, sustained, sitting completely idle"],
+    ["Idle, after the fix", "~4%, measured on the real packaged app"],
+], [90, 75]))
+A(P("Root cause: the voice-activity-detection library's ONNX runtime defaults to a "
+    "<b>spinning thread pool</b> &mdash; burning CPU continuously waiting for the next audio chunk "
+    "instead of sleeping between them, regardless of how little real work arrives. A single "
+    "environment variable, <font face='Courier'>OMP_WAIT_POLICY=PASSIVE</font>, set before anything "
+    "else loads, was the entire fix &mdash; confirmed with a synthetic tight-loop benchmark first "
+    "(389% &rarr; 94%), then against the actual project code path, then against the real running "
+    "app. No measurable effect on how quickly she notices speech."))
+
+A(H2("Alarms and timers, built from nothing"))
+A(P("“I told her to keep an alarm, she couldn't” &mdash; because the feature never "
+    "existed. Built as its own module, deliberately <b>not</b> routed through the local model: a "
+    "timer has to fire at the right second, and asking a 3B model to extract “20 minutes” "
+    "reliably is exactly the kind of precise, literal task it fails at (see the Morse code "
+    "experiment). Regex-based parsing instead, gated on an explicit keyword "
+    "(“alarm”, “remind”, “timer”, “wake me”) as well as a "
+    "time expression, so ordinary conversation like “I usually get up at 7” can't silently "
+    "schedule a bogus alarm."))
+A(P("A real bug was caught before it shipped: <font face='Courier'>“set a timer for 10 "
+    "minutes”</font> was initially misread as the clock time <font face='Courier'>10:00</font>, "
+    "because the absolute-time pattern matched “for 10” before the relative-duration "
+    "pattern got a chance. Fixed by making sure a duration expression is always claimed first.", "LiaNote"))
+A(P("Alarms persist in the database across restarts, and a background watchdog checks for due ones "
+    "every 10 seconds regardless of what else is happening &mdash; verified live, including forcing "
+    "a near-term alarm to confirm it actually interrupts and speaks."))
+
+A(H2("Music: honest failure instead of a fabricated answer"))
+A(P("“Play music” didn't work either, for a different reason: Windows media control is a "
+    "<i>remote</i> for something already playing elsewhere (Spotify, a browser tab) &mdash; it "
+    "cannot conjure a track into existence. Worse, when nothing was playing, she was caught "
+    "<b>inventing a fake “jazz playlist”</b> rather than saying she had nothing to check. "
+    "Fixed at the source: media commands now speak their result, and failure produces an honest "
+    "line (“there's nothing loaded anywhere for me to play”) instead of silence or a "
+    "guess. Command phrasing was also broadened, and a real inconsistency was found and closed "
+    "along the way &mdash; typed input never went through the same natural-language command "
+    "matching that spoken input did."))
+
+A(H2("Running twice"))
+A(P("Raised by a plain question &mdash; “do I need to restart, or can I just run her file?” "
+    "&mdash; which exposed a real gap: nothing stopped a second copy starting while the autostart "
+    "one was still up, which would mean two processes fighting over the same microphone and "
+    "speakers. A Windows mutex now blocks a second instance outright, tested across genuinely "
+    "separate processes and confirmed to release cleanly even after a forced kill, not just a "
+    "clean exit."))
+
+A(H2("A close call: two leaked keys"))
+A(P("While preparing to publish the repository, both live API keys were found sitting in git "
+    "history &mdash; not in project source, but in Claude Code's own permission-cache files "
+    "(<font face='Courier'>.claude/settings.json</font>, <font face='Courier'>settings.local.json</font>), "
+    "which had recorded the literal command strings used to set them as environment variables. "
+    "Confirmed the commit had genuinely been pushed (local <font face='Courier'>main</font> and "
+    "<font face='Courier'>origin/main</font> matched exactly)."))
+A(P("A <font face='Courier'>.gitignore</font> alone would not have fixed this: git ignores that "
+    "file for anything already tracked, and it does nothing to a secret already sitting in a "
+    "pushed commit's history. Both keys were rotated &mdash; the only real fix once a secret has "
+    "been public, however briefly &mdash; and 2,019 files (the settings folder, build output, "
+    "databases, logs) were untracked from git without touching a single file on disk, so the same "
+    "leak can't repeat.", "LiaNote"))
 
 # ------------------------------------------------------------- limitations ---
 A(H1("What she still can't do"))
@@ -305,12 +370,13 @@ A(bullets([
     "quietly got worse.",
     "<b>Whole-document questions.</b> She retrieves passages, not books. “Summarise this 300-page PDF” "
     "will not work; “what does it say about X” will.",
-    "<b>The packaged app carries ~77MB it doesn't need.</b> Something pulled <font face='Courier'>spacy</font> "
-    "into the frozen build even though the default voice engine (Piper) never imports it — not "
-    "chased down yet, doesn't break anything, just dead weight.",
     "<b>Music playback control is Windows-only.</b> Built against System Media Transport Controls, "
-    "which has no equivalent on other platforms.",
+    "which has no equivalent on other platforms, and it can only control something already playing "
+    "&mdash; it cannot launch or choose music from nothing.",
 ]))
+A(P("Resolved since the last pass: the packaged app's stray ~77MB of unused "
+    "<font face='Courier'>spacy</font> dependency is gone (it came in with KittenTTS, now fully "
+    "removed); a second process could no longer start alongside a running one.", "LiaNote"))
 
 A(H2("Scanned PDFs"))
 A(P("There is no OCR. If text isn't selectable in a PDF viewer, there is nothing to extract."))
@@ -337,7 +403,7 @@ A(table([
     ["ECHO_MATCH_RATIO", "0.5", "She ignores you while talking (raise it)"],
     ["WHISPER_MODEL", "small.en", "Names come out wrong (go bigger)"],
     ["VOICE_NAME", "en_US-amy-medium", "You want a different voice"],
-    ["VOICE_ENGINE", "piper", "\"kitten\" for a second, smaller voice set (Bella and others)"],
+    ["VOICE_ENGINE", "piper", "\"system\" forces the built-in Windows voice"],
     ["LIBRARY_AUTO_READ", "False", "You want documents read without asking"],
     ["RETRIEVAL_MIN_WORDS", "3", "Short replies still feel slow (raise it), or memory feels thin (lower it)"],
     ["OPENROUTER_ONLINE", "True", "Live search on \"look that up\" instead of a guess"],

@@ -17,17 +17,5 @@ Pillow>=10.0          # draws the tray icon
 # --- media control (optional) ---
 winsdk>=1.0            # Windows System Media Transport Controls -- play/pause/skip
 
-# --- KittenTTS: a second, smaller local voice engine (optional, off by default) ---
-# Not a clean `pip install` -- the released wheel's own metadata demands
-# misaki>=0.9.4, which doesn't exist on PyPI (latest is 0.7.4) yet the package
-# works fine with it. Install with --no-deps, then the actual dependencies by
-# hand:
-#
-#   pip install --no-deps https://github.com/KittenML/KittenTTS/releases/download/0.8.1/kittentts-0.8.1-py3-none-any.whl
-#   pip install misaki espeakng_loader num2words spacy phonemizer
-#
-# Voices: Bella, Jasper, Luna, Bruno, Rosie, Hugo, Kiki, Leo.
-# Set VOICE_ENGINE = "kitten" in config.py to use it.
-
 # --- internet (optional, off by default until GROQ_API_KEY is set) ---
 # no extra package -- internet.py uses requests, already listed above

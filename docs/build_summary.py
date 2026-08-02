@@ -162,6 +162,41 @@ SUMMARIES = {
         "~2.4&ndash;4.0s (slower, because it's actually searching). Confirmed the new trigger "
         "checks add no measurable cost to ordinary conversation. This document, and the three "
         "others."),
+    44: ("Good work.", "&mdash;"),
+    45: ("Asked when a restart is actually needed versus just running her file, and how long "
+        "to wait before speaking after one.",
+        "Found a real gap while answering: nothing stopped her running twice if launched by hand "
+        "while the autostart copy was still up &mdash; two processes would fight over the same "
+        "microphone. Added a Windows single-instance lock, tested across genuinely separate "
+        "processes including surviving a forced kill, before answering the actual question: no "
+        "restart needed, just run <font face='Courier'>Lia.exe</font>; wait for her audible "
+        "greeting, that's the cue she's ready."),
+    46: ("Provided two new keys after the leak, and asked to properly ensure the gitignore "
+        "actually works.",
+        "Set both new keys as environment variables and verified them working. Found the "
+        "gitignore alone had done nothing, since <font face='Courier'>.claude/</font>, "
+        "<font face='Courier'>build/</font> and <font face='Courier'>dist/</font> were already "
+        "tracked in git &mdash; untracked 2019 files with <font face='Courier'>git rm --cached</font> "
+        "without touching a single file on disk, so the gitignore could actually take effect from "
+        "here on."),
+    47: ("Five conclusions from actually living with her: CPU usage over 50%, music and alarms "
+        "that didn't work, remove KittenTTS, rename her to Wade, and get web search genuinely "
+        "working.",
+        "Measured the CPU complaint rather than guessing at it &mdash; the voice-detection "
+        "library's ONNX runtime was spinning at ~290% of one core, continuously, while sitting "
+        "completely idle. One environment variable fixed it, verified down to ~4% on the real "
+        "packaged app. Built alarms and timers from nothing, including a background watchdog and "
+        "persistence across restarts &mdash; caught and fixed a real parsing bug "
+        "(\"for 10 minutes\" misread as a clock time) before it shipped. Made music commands admit "
+        "honestly when there's nothing to play, after catching her invent a fake jazz playlist "
+        "once during testing. Removed KittenTTS entirely, dropping the packaged app by 112MB. "
+        "Renamed her to Wade. Broadened and verified the web-search path end to end with the new "
+        "keys."),
+    48: ("(a tool call was interrupted mid-turn)", "&mdash;"),
+    49: ("Try again.", "Re-ran the interrupted step and continued the same round of fixes."),
+    50: ("Asked for the PDFs to be brought current, plus a new study reference covering the "
+        "tools used in the project &mdash; NumPy and the rest.",
+        "This document, and the other three."),
 }
 
 PHASES = {
@@ -172,6 +207,7 @@ PHASES = {
     26: "Fixing what the real world broke",
     32: "Writing it down",
     38: "Connecting her to the world",
+    45: "What daily use surfaced",
 }
 
 
@@ -236,13 +272,16 @@ def main():
     story.append(Spacer(1, 14))
     story.append(H1("What it came to"))
     story.append(callout(
-        "A companion that starts at login, greets you by name, listens on an open mic, answers out "
-        "loud, remembers across days, reads what you hand her, and never sends a word off the "
-        "machine &mdash; except the one narrow, optional exception she'll now admit to: weather, "
-        "and a question you explicitly ask her to look up online. Eleven modules.<br/><br/>"
-        "Still open: no way to forget, she still occasionally invents small details, fact keys drift, "
-        "there are no tests, and the packaged app is carrying ~77MB of a dependency "
-        "(<font face='Courier'>spacy</font>) that nothing in it actually needs by default."))
+        "A companion called Wade knows by name, that starts at login, greets him, listens on an "
+        "open mic, answers out loud, remembers across days, reads what he hands her, sets real "
+        "alarms and timers, controls whatever's playing on the machine, and never sends a word off "
+        "it &mdash; except the one narrow, optional exception she'll admit to: weather, and a "
+        "question explicitly asked of the web. Twelve modules, single-instance protected, running "
+        "at roughly 4% of one core while idle instead of 290%.<br/><br/>"
+        "Still open: no way to forget, she still occasionally invents small details, fact keys "
+        "drift, and there are no tests &mdash; which matters, because the CPU issue, the parsing "
+        "bug in alarms, and the music confabulation were all silent until someone actually lived "
+        "with her and noticed."))
 
     build(HERE / "Lia - Session Summary.pdf",
           "Lia — Session Summary",

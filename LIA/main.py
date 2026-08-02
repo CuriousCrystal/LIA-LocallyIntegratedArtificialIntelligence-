@@ -1,4 +1,17 @@
 import ctypes
+import datetime as dt
+import os
+
+# Measured: the VAD model (via onnxruntime's OpenMP backend) defaults to a
+# spinning thread pool that burns CPU waiting for the next chunk instead of
+# sleeping between them -- 389% of one core, continuously, just from Lia
+# sitting there listening to silence. PASSIVE drops that to ~94% with no
+# measurable effect on real-time detection (32ms chunks only need ~31
+# calls/sec; even passive-waited throughput is far above that). Must be set
+# before onnxruntime/ctranslate2 initialize, so this runs before any other
+# import in the whole process.
+os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
+
 import queue
 import re
 import sys
@@ -20,6 +33,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 import requests
 
+import alarms
 import db
 import diary
 import internet
@@ -61,6 +75,7 @@ HELP = """
   /openmic on|off open mic (just talk) vs push-to-talk (Enter to record)
   /wake on|off    only answer when you say her name
   /media play|pause|next|previous   control whatever's playing on Windows
+  /alarms [cancel]                  list pending alarms/timers, or clear them
   /library [scan] what she has read; 'scan' picks up new files
   /voices         list voices found in LIA/voices/
   /help           this list
@@ -312,17 +327,44 @@ def handle_command(cmd: str, speaker: voice.Speaker, state: dict) -> bool:
         else:
             print("[wake word off -- she answers anything she hears]\n")
 
+    elif name == "/alarms":
+        if arg == "cancel":
+            n = db.cancel_all_alarms()
+            print(f"[cancelled {n} alarm(s)]\n" if n else "[nothing to cancel]\n")
+        else:
+            pending = db.pending_alarms()
+            if not pending:
+                print("[no alarms set -- try \"set an alarm for 7am\" or \"remind me in 20 minutes\"]\n")
+            else:
+                print("[pending alarms]")
+                for row in pending:
+                    when = dt.datetime.fromisoformat(row["fire_at"]).strftime("%a %I:%M %p").lstrip("0").replace(" 0", " ")
+                    print(f"  - {row['label']} at {when}")
+                print("  \"/alarms cancel\" clears all of them\n")
+
     elif name == "/media":
+        # Spoken feedback too, not just text -- a failed "play music" said out
+        # loud needs to be heard, not just logged, or it looks like nothing
+        # happened at all.
+        def respond(ok: str, fail: str):
+            print(f"[{ok if outcome else fail}]\n")
+            speaker.say(ok if outcome else fail)
+
         if not media.available():
             print("[media control isn't available -- see LIA/media.py]\n")
         elif arg == "play":
-            print("[playing]\n" if media.play() else "[couldn't find anything to play]\n")
+            outcome = media.play()
+            respond("playing", "There's nothing loaded anywhere for me to play -- "
+                                "open something in Spotify or a browser tab first.")
         elif arg == "pause":
-            print("[paused]\n" if media.pause() else "[nothing seems to be playing]\n")
+            outcome = media.pause()
+            respond("paused", "Nothing seems to be playing right now.")
         elif arg == "next":
-            print("[skipped]\n" if media.next_track() else "[couldn't skip -- nothing playing?]\n")
+            outcome = media.next_track()
+            respond("skipped", "There's nothing playing to skip.")
         elif arg == "previous":
-            print("[went back a track]\n" if media.previous_track() else "[couldn't go back]\n")
+            outcome = media.previous_track()
+            respond("went back a track", "There's nothing playing to go back on.")
         else:
             info = media.now_playing()
             if info and (info["title"] or info["artist"]):
@@ -551,7 +593,9 @@ def read_input(
                 break
             time.sleep(0.05)
 
-        if typed or not state["listening"] or listener is None:
+        if typed:
+            return as_instruction(typed)
+        if not state["listening"] or listener is None:
             return typed
 
         spoken = listener.listen(hint=speech_hint())
@@ -571,7 +615,7 @@ def read_input(
 
         typed = keys.take()
         if typed is not None:
-            return typed
+            return as_instruction(typed) if typed else typed
         if spoken:
             meant_for_her = accept_spoken(spoken, state)
             if meant_for_her is None:
@@ -665,6 +709,24 @@ def start_idle_watchdog(session: Session, stop: threading.Event) -> threading.Th
     return thread
 
 
+def start_alarm_watchdog(speaker: voice.Speaker, stop: threading.Event) -> threading.Thread:
+    """Speak any alarm/timer that comes due, regardless of what else is happening.
+
+    Checked independently of the conversation loop -- an alarm has to fire
+    whether or not you're mid-sentence with her, or she isn't listening at all.
+    """
+    def loop():
+        while not stop.wait(10):
+            for label in alarms.check_due():
+                message = f"{label.capitalize()} is up."
+                print(f"\n[{message}]")
+                speaker.say(message)
+
+    thread = threading.Thread(target=loop, daemon=True)
+    thread.start()
+    return thread
+
+
 def end_session(session_id: str, short_term: list[dict]):
     if not short_term:
         return
@@ -741,6 +803,7 @@ def main(controls: "Controls | None" = None):
 
     stop_watchdog = threading.Event()
     start_idle_watchdog(session, stop_watchdog)
+    start_alarm_watchdog(speaker, stop_watchdog)
 
     print("LIA is here. Say 'bye' to end the session, /help for commands.")
     print(f"[she'll close out the conversation on her own after {IDLE_MINUTES} quiet minutes]")
@@ -817,6 +880,15 @@ def main(controls: "Controls | None" = None):
         if handle_command(user_input, speaker, state):
             if state["listening"] and listener is None:
                 listener = voice.Listener()
+            continue
+
+        # Checked deterministically, before the LLM ever sees it -- a timer
+        # has to fire at the right second, not whatever a 3B model guesses.
+        alarm_reply = alarms.schedule(user_input)
+        if alarm_reply is not None:
+            print(f"LIA: {alarm_reply}\n")
+            speaker.say(alarm_reply)
+            speaker.wait()
             continue
 
         if user_input.lower() in {"bye", "exit", "quit"}:

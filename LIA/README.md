@@ -193,7 +193,7 @@ she'd never learn anything.
 | `MIC_SETTLE_SECONDS` | raise if she answers her own voice (headphones fix this outright) |
 | `WHISPER_MODEL` | `small.en` gets names right that `base.en` garbles |
 | `IDLE_MINUTES` | how long a silence ends the conversation |
-| `VOICE_ENGINE` | `"piper"` (default) / `"kitten"` for a second, smaller voice set / `"system"` |
+| `VOICE_ENGINE` | `"piper"` (default) / `"system"` for the built-in Windows voice |
 | `RETRIEVAL_MIN_WORDS` | skips memory/library lookup below this many words — raise it if short replies still feel slow |
 | `OPENROUTER_ONLINE` | live web search on "look that up", instead of a guess — see `internet.py` |
 

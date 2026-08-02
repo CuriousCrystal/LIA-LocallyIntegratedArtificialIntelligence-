@@ -83,10 +83,19 @@ A(table([
     ["“Lia, you can talk”", "Start speaking again"],
     ["“Lia, read my files”", "Read documents you've given her"],
     ["“Play music” / “pause music”  <br/>“next song” / “previous song”", "Control whatever's playing on the computer"],
+    ["“Set an alarm for 7am”  <br/>“Remind me in 20 minutes”", "Set a real alarm or timer — she'll interrupt to tell you"],
 ], [62, 103]))
 
 A(P("Everything else you say she treats as conversation, so you can talk about stopping, sleeping "
     "or being quiet without accidentally switching her off."))
+
+A(H2("Alarms and timers"))
+A(P("She sets these from plain speech — a clock time (“set an alarm for 7am”) or a "
+    "duration (“remind me in 20 minutes”). They keep running even if you close the laptop and "
+    "come back later, and she'll interrupt whatever's happening to tell you when one is due."))
+A(P("Music is different: she can only control something already playing somewhere (Spotify, a "
+    "browser tab). She can't start a song from nothing — if nothing is playing anywhere, she'll "
+    "say so rather than pretend.", "LiaNote"))
 
 A(H2("The weather, and looking things up"))
 A(P("Ask <b>“what's the weather like”</b> and she'll check, using your general location — no setup "
