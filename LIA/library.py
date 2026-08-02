@@ -5,11 +5,18 @@ Drop files into LIA/library/ and she indexes them: the text is split into
 passages, each passage is embedded, and relevant ones are handed to her when
 they bear on what you're asking about.
 
-Supported: .pdf, .txt, .md, .markdown
+Supported: .pdf, .epub, .txt, .md, .markdown
 
 Deliberately separate from her memories. What you *said* to her and what she
 *read* are different kinds of knowing, and blurring them is how an assistant
 starts claiming a document's opinions as your own.
+
+A note on whole books: she retrieves passages, not the book. A novel indexes
+into hundreds of chunks (a ~300-page book runs well over an hour of embedding
+calls at roughly a second each), and afterward she can discuss specific
+scenes or characters you ask about -- she cannot recite the book start to
+finish. That would mean reading the entire text through her voice, which is a
+different feature from anything built here.
 """
 
 import json
@@ -29,7 +36,7 @@ from config import (
     LIBRARY_MIN_SCORE,
 )
 
-SUPPORTED = {".pdf", ".txt", ".md", ".markdown"}
+SUPPORTED = {".pdf", ".epub", ".txt", ".md", ".markdown"}
 
 
 # ------------------------------------------------------------- extraction ---
@@ -81,13 +88,39 @@ def _read_pdf(path: Path) -> list[tuple[int, str]]:
     return _strip_running_heads(pages)
 
 
+def _read_epub(path: Path) -> list[tuple[int, str]]:
+    """(chapter_number, text) per document section -- reuses the PDF (page_number,
+    text) convention so chunking/citation code doesn't need to know the
+    difference. Most chapters announce their own name in the first line
+    ("CHAPTER EIGHT"), so the imprecision of calling it a "page" in citations
+    barely shows."""
+    import ebooklib
+    from bs4 import BeautifulSoup
+    from ebooklib import epub
+
+    book = epub.read_epub(str(path))
+    chapters = []
+    number = 0
+    for item in book.get_items():
+        if item.get_type() != ebooklib.ITEM_DOCUMENT:
+            continue
+        number += 1
+        text = BeautifulSoup(item.get_content(), "html.parser").get_text()
+        if text.strip():
+            chapters.append((number, text))
+    return chapters
+
+
 def _read_text(path: Path) -> list[tuple[int, str]]:
     return [(0, path.read_text(encoding="utf-8", errors="replace"))]
 
 
 def extract(path: Path) -> list[tuple[int, str]]:
-    if path.suffix.lower() == ".pdf":
+    suffix = path.suffix.lower()
+    if suffix == ".pdf":
         return _read_pdf(path)
+    if suffix == ".epub":
+        return _read_epub(path)
     return _read_text(path)
 
 

@@ -266,6 +266,98 @@ SUMMARIES = {
     50: ("Asked for the PDFs to be brought current, plus a new study reference covering the "
         "tools used in the project &mdash; NumPy and the rest.",
         "This document, and the other three."),
+    51: ("Wanted a Growth Log PDF tracking her build stages &mdash; making her, file reading, "
+        "voices and ML models, controlling actions &mdash; to replace the old \"what we built\" "
+        "PDF. Asked in passing whether she can actually control playback and volume, since she "
+        "can't \"phase out of the hypervisor\" to do it herself.",
+        "Built <font face='Courier'>Lia - Growth Log.pdf</font> across those four stages and "
+        "deleted the old <font face='Courier'>Lia - What We Built.pdf</font> and its generator. "
+        "Play/pause already worked through Windows' own media transport, but volume control "
+        "genuinely didn't exist &mdash; built it against the Core Audio API via "
+        "<font face='Courier'>pycaw</font> after confirming a simulated key-press approach "
+        "silently did nothing at all."),
+    52: ("Asked to keep the docs current from here on without being asked each time, and floated "
+        "the idea of her telling your voice apart from anyone else's before committing to it.",
+        "Weighed it rather than jumping to code &mdash; a wrong call cuts both ways, refusing "
+        "you or trusting an impostor. Agreed a local voiceprint model was worth trying before "
+        "any of the actions built on top of it."),
+    53: ("Sketched the behaviour: greet normally when it's really him, go cautious rather than "
+        "act normally if the voice doesn't match.",
+        "Built <font face='Courier'>speaker_id.py</font> &mdash; a local voice-embedding model "
+        "(3D-Speaker's CAM++ via <font face='Courier'>sherpa-onnx</font>, no PyTorch), enrolled "
+        "from a few repetitions of his name and compared against everything said after."),
+    54: ("When she doesn't recognise the voice, she shouldn't share personal details, and every "
+        "action should be gated &mdash; not just the ones that happen to touch a browser.",
+        "Gated media and volume commands on a voice mismatch, and held personal facts back from "
+        "the reply context on the same signal."),
+    55: ("The actual spec: lock every session by default. Say \"it's Wade\" or get asked for a "
+        "spoken passcode (\"ENCODE\") &mdash; get it wrong and she stops listening outright. A "
+        "second passcode (\"DECODE\") makes her read and explain a specific reference PDF.",
+        "Built the session-level access gate &mdash; <font face='Courier'>check_access_gate()</font>, "
+        "a hard lockout on a wrong passcode recoverable only by hand, and "
+        "<font face='Courier'>explain_document()</font> for DECODE. Found and fixed two real bugs "
+        "along the way: saying \"bye\" while locked was treated as a wrong passcode guess instead "
+        "of exiting, and a second, unrelated bug where the keyboard-input thread spun at full CPU "
+        "once stdin hit EOF."),
+    56: ("(a tool call was interrupted mid-turn) Try again.",
+        "Re-ran the interrupted step and caught a real bug this pass: saying the identity phrase "
+        "in the same breath as a request (\"it's Wade, play some music\") was losing the identity "
+        "claim, because the request got rewritten to a command first. Fixed by checking for the "
+        "claim on the raw words, before any rewriting happens."),
+    57: ("Flag the passcode.",
+        "Moved <font face='Courier'>PASSCODE_UNLOCK</font> out of <font face='Courier'>config.py</font> "
+        "and into an environment variable, the same pattern as the API keys &mdash; a plaintext "
+        "passcode sitting in a file headed for a public repo isn't a passcode. Left unset, the "
+        "gate now disables itself gracefully with a one-time log line, rather than locking anyone "
+        "out with something that can never match."),
+    58: ("Asked if everything was in order, and for the PDFs and <font face='Courier'>requirements.txt</font> "
+        "to be brought current.",
+        "Audited <font face='Courier'>requirements.txt</font> against every actual import across "
+        "the codebase, including the lazy, function-local ones &mdash; found a real gap, "
+        "<font face='Courier'>pypdf</font> was used but never listed. Regenerated the PDFs."),
+    59: ("Floated camera access, flagging the security angle himself before asking.",
+        "Talked it through rather than building anything &mdash; a live camera is a much bigger "
+        "step than anything shipped so far, and the concern he raised on his own was the right "
+        "one to weigh first."),
+    60: ("Refined the camera idea to \"look at something, discuss it, maybe search online\" &mdash; "
+        "asked to be corrected if internet access isn't real, and whether a week of daily use is "
+        "a good idea before more changes.",
+        "Confirmed the internet path is real but narrow: weather needs no key at all, factual "
+        "lookups go through Groq or OpenRouter's actual web search once a key is set, nothing "
+        "beyond that. Agreed the week-of-real-use idea was the right next step before adding "
+        "anything else, especially to calibrate the voice-match threshold against real speech "
+        "instead of guesses."),
+    61: ("Asked whether she can search Reddit specifically and how to phrase it, and whether a "
+        "Harry Potter epub just dropped into the library folder actually works.",
+        "Found Reddit searches were only catching half the phrasings tried, since none of them "
+        "contained any existing trigger phrase as a literal substring &mdash; added "
+        "<font face='Courier'>\"reddit\"</font> itself as a trigger, verified against all four. "
+        "Confirmed <font face='Courier'>.epub</font> had never been a supported format, built "
+        "extraction for it, and verified it end to end in the packaged executable &mdash; which "
+        "also settled a real question, that pure-Python packages like "
+        "<font face='Courier'>pypdf</font> don't appear as files in a frozen build, so running "
+        "the exe rather than searching its folder was the only real test."),
+    62: ("Confirmed she can read now, and noted he'd keep PDF formats in mind.",
+        "Confirmed it, with the practical detail: <font face='Courier'>.epub</font>, "
+        "<font face='Courier'>.pdf</font>, <font face='Courier'>.txt</font> and "
+        "<font face='Courier'>.md</font> all work, and \"read my files\" is what actually starts "
+        "the indexing. Also cleared up a stale editor tab pointing at a test file that had "
+        "already been deleted."),
+    63: ("Pointed out Reddit was only an example &mdash; asked about YouTube, and whether "
+        "controlling YouTube Music would work.",
+        "Two separate answers, both verified rather than assumed. Added "
+        "<font face='Courier'>\"youtube\"</font> as a lookup trigger, the same fix as Reddit, "
+        "tested against four phrasings plus two that should <i>not</i> trigger. For playback: no "
+        "change was needed &mdash; the media control never knew which app it was talking to in "
+        "the first place, it asks Windows for whatever session is active. Confirmed live by "
+        "checking it correctly picked up a browser tab, which is what actually proves it's "
+        "app-agnostic rather than just Spotify-shaped."),
+    64: ("Confirmed search alone is enough &mdash; no need for her to summarise what's said "
+        "inside a video.",
+        "Agreed, and left it there rather than building toward it."),
+    65: ("Asked for the docs to be brought current, and whether he could call this assistant Cia.",
+        "This document and the others. On the name: yes &mdash; and worth noting it fits the "
+        "pattern, since Lia was named the same way."),
 }
 
 PHASES = {
@@ -278,6 +370,8 @@ PHASES = {
     38: "Connecting her to the world",
     45: "What daily use surfaced",
     51: "Learning to recognise her",
+    57: "Locking the gate down",
+    60: "Deciding what's next",
 }
 
 

@@ -68,6 +68,14 @@ def read_session(path: Path):
 IDE_TAG = re.compile(r"<(ide_opened_file|ide_selection)>.*?</\1>", re.S)
 REMINDER = re.compile(r"<system-reminder>.*?</system-reminder>", re.S)
 COMMAND = re.compile(r"<command-(name|message|args)>.*?</command-\1>", re.S)
+# Claude Code inserts this whole-message preamble when context gets compacted --
+# it's the harness resuming itself, not anything typed. It also runs to tens of
+# thousands of characters, which is a single unsplittable table cell taller than
+# a page and crashes the PDF layout, so it can't just be left in like a long
+# real message would be.
+CONTINUATION = re.compile(
+    r"^This session is being continued from a previous conversation.*", re.S
+)
 
 
 def clean_user(text: str) -> tuple[str, list[str]]:
@@ -84,6 +92,7 @@ def clean_user(text: str) -> tuple[str, list[str]]:
     text = IDE_TAG.sub("", text)
     text = REMINDER.sub("", text)
     text = COMMAND.sub("", text)
+    text = CONTINUATION.sub("", text)
     return text.strip(), notes
 
 

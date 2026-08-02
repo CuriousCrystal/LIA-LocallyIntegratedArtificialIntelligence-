@@ -103,6 +103,24 @@ A(P("A real gap surfaced during this stage: she had no idea any of this existed.
     "Fixed by adding an explicit, honest capability list to her own system prompt, so she reports "
     "what she can and can't do accurately instead of guessing."))
 
+A(H2("Reaching outside the machine: real lookups, and a fuller library"))
+A(P("Two separate systems, both narrow and optional by design. <b>Internet access</b> — weather "
+    "needs no key at all (Open-Meteo, geolocated from your IP); “look that up” checks a live source "
+    "instead of guessing, via Groq or OpenRouter's actual web-search mode, whichever key is set. "
+    "Naming a source works too — “search Reddit for…” — though one caveat came out of testing: "
+    "search-operator syntax like <font face='Courier'>site:reddit.com</font> makes the underlying "
+    "search decline entirely, where plain natural language works. A later pass found the natural "
+    "phrasings people actually use for Reddit weren't all being caught — fixed by adding "
+    "<font face='Courier'>\"reddit\"</font> itself as a trigger word, rather than requiring an exact "
+    "phrase match. YouTube got the same trigger word shortly after, for the same reason — with the "
+    "same honest limit either way: it's still a text search that happens to mention the site, not "
+    "anything that can watch or listen to what's actually there."))
+A(P("<b>The library</b> now reads <font face='Courier'>.epub</font> files as well as PDF, text, and "
+    "markdown — added after a real book (a Harry Potter novel) got dropped in and turned out not to "
+    "work yet. A full novel is a genuine time cost to index (roughly 20 minutes of embedding calls "
+    "for one book), and even once indexed she retrieves passages, not the whole text — she can "
+    "discuss a specific scene or character, not narrate the book start to finish.", "LiaNote"))
+
 A(H2("Knowing who's asking: voice recognition"))
 A(P("If actions are the risk this stage introduced, this is the safeguard for it. Say "
     "“Lia, it's Wade” a few times and she builds a voiceprint — a local model (3D-Speaker's "

@@ -212,6 +212,15 @@ A(P("A pure-Python library for reading and manipulating PDF files — extracting
 A(P("<b>In Lia:</b> reads any PDF dropped into her library folder, page by page, before the text "
     "is chunked and embedded for later retrieval."))
 
+A(H2("ebooklib and BeautifulSoup"))
+A(P("An <font face='Courier'>.epub</font> file is a zip archive of small HTML files, one roughly per "
+    "chapter, plus a table of contents describing their order. ebooklib unpacks that structure and "
+    "hands back each chapter's raw HTML; BeautifulSoup, a library built for parsing HTML and pulling "
+    "text or specific elements out of it, then strips the markup down to the plain words underneath."))
+A(P("<b>In Lia:</b> together they let the library folder accept whole novels, not just PDFs and "
+    "text files — added after a real book (a Harry Potter novel) turned out not to work yet. Each "
+    "chapter is treated the same way a PDF page is: extracted, then chunked and embedded on its own."))
+
 A(H2("Groq"))
 A(P("A company that hosts open language models (like Meta's Llama family, at sizes far bigger than "
     "what fits on a home GPU) on custom chips (LPUs) built specifically for fast inference — its "

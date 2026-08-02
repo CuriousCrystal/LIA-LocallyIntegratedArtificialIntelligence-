@@ -164,6 +164,17 @@ INTERNET_TRIGGER_PHRASES = [
     "search online", "search the internet", "check online",
     "check the internet", "google that", "google it", "search for",
     "can you search", "what's the latest",
+    # Naming reddit specifically is a strong, deliberate signal on its own --
+    # "search reddit for X" and "what does reddit think about X" otherwise
+    # don't contain any of the phrases above as a contiguous substring, so
+    # the single most natural way to ask this was silently falling through
+    # to the local model guessing instead of actually looking anything up.
+    "reddit",
+    # Same reasoning, same fix, for "search youtube for X" / "what's on
+    # youtube about X". Note this only ever triggers a text web search that
+    # happens to mention YouTube (titles, descriptions, comments) -- she has
+    # no way to watch or listen to an actual video.
+    "youtube",
 ]
 
 # Weather is answered from a live source directly -- Open-Meteo, no API key

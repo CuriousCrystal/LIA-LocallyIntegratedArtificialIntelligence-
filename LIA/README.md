@@ -138,6 +138,12 @@ version of the same kind of model Lia already runs locally; a plain
 chat-completions call to it has no more access to today's news than she does
 already. It's the fallback, or the option if that's the only key you have.
 
+Naming a source works too — *"search Reddit for..."* or *"what does Reddit think
+about..."* pulls in real, current opinions rather than a guess. One caveat found
+by testing it: search-engine operators like `site:reddit.com` make the
+underlying search decline entirely (it answers as if it has no web access at
+all) — plain natural language is what actually works.
+
 **Music** needs nothing at all — it uses Windows' own System Media Transport
 Controls, the same thing behind your keyboard's media keys, so it works with
 whatever's actually playing (Spotify, a browser tab, Windows Media Player)

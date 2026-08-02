@@ -103,6 +103,10 @@ A(P("Ask <b>“what's the weather like”</b> and she'll check, using your gener
 A(P("Ask her to <b>“look that up”</b> for anything else — a fact, a question she isn't sure about "
     "— and, if she's set up with an internet connection for this, she'll actually check rather than "
     "guess. If that hasn't been set up, she'll say so plainly rather than pretending to know."))
+A(P("Naming a source works too — <i>“search Reddit for…”</i>, <i>“search YouTube for…”</i>, or "
+    "<i>“what does Reddit think about…”</i> — pulls in real, current results instead of a guess. "
+    "One limit worth knowing: naming YouTube only ever gets her a text search that happens to "
+    "mention it — titles, descriptions, comments. She can't watch or listen to an actual video.", "LiaNote"))
 A(P("Everything else about her stays completely private and offline. This is the one deliberate, "
     "narrow exception, and only for what you explicitly ask her to check.", "LiaNote"))
 
@@ -151,7 +155,7 @@ A(PageBreak())
 A(H1("Giving her something to read"))
 
 A(P("There is a folder on this computer where you can put documents you'd like her to read — "
-    "PDFs, or plain text notes."))
+    "PDFs, epub books, or plain text notes."))
 
 A(code("dist\\Lia\\library\\"))
 
@@ -169,6 +173,9 @@ A(bullets([
     "entire document at once",
     "<b>Won't work:</b> scanned documents or photographs of pages. If you can't select the text on "
     "screen with your mouse, there's nothing for her to read",
+    "<b>A whole novel is a real wait:</b> a full-length book runs to several hundred passages — "
+    "expect roughly 20 minutes the first time you add one. It happens in the background, so she "
+    "stays usable meanwhile, but that book isn't answerable about until it finishes.",
 ]))
 
 # ------------------------------------------------------------- honesty ---

@@ -9,7 +9,7 @@ my files"** (or type `/library scan`). She reads it then, and not before.
 outside it. Nothing is scanned, indexed, or absorbed until you ask. A file
 sitting here is available to her, not already in her head.
 
-**Supported:** `.pdf`, `.txt`, `.md`
+**Supported:** `.pdf`, `.epub`, `.txt`, `.md`
 
 Subfolders are fine — she looks all the way down, but only when asked.
 
@@ -28,6 +28,10 @@ that best matched those words — a 300-page book does not fit in an 8k context.
 - **Indexing is slow.** Every passage costs an embedding call, about half a
   second. A long PDF can take several minutes the first time. It only happens
   once per file unless you edit it.
+- **A full novel is a real wait, not a quick one.** A ~300-page book runs to
+  several hundred passages — measured at ~590 for a single Harry Potter novel,
+  around 20 minutes of embedding calls. It runs in the background, so she stays
+  usable meanwhile, but the book itself won't be answerable until it finishes.
 - **Scanned PDFs won't work.** If the text isn't selectable in a PDF viewer,
   there's nothing to extract — this reads text, it doesn't do OCR.
 - **She'll say where things came from**, and she's told to admit when the

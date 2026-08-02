@@ -3,6 +3,8 @@ numpy>=1.26
 
 # --- library (reads PDFs dropped in library/, and DECODE reads its reference doc) ---
 pypdf>=4.0             # PDF text extraction
+ebooklib>=0.18         # .epub text extraction
+beautifulsoup4>=4.12   # strips the HTML inside epub chapters down to plain text
 
 # --- voice: speaking ---
 piper-tts>=1.6        # local neural TTS, uses the voice files in voices/
