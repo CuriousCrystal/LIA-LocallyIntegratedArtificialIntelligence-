@@ -65,6 +65,23 @@ SHORT_TERM_TURNS = 8
 # How many retrieved long-term memories to inject per turn.
 MEMORY_TOP_K = 4
 
+# Below this cosine similarity, a "closest available" memory still isn't
+# actually relevant -- drop it rather than force it in. Without this floor,
+# retrieve_relevant() always hands back its top MEMORY_TOP_K no matter how
+# weak the best matches are, and a small model dutifully works a barely-related
+# quote from days ago into a reply that has nothing to do with it.
+#
+# Not copied from LIBRARY_MIN_SCORE (0.45) -- checked against real stored
+# turns instead of assuming the same number applies, since a full conversation
+# turn and a document passage don't sit on the same similarity scale. At 0.45,
+# unrelated small talk ("quick text check", "hi, is everything working") still
+# scored 0.46-0.50 against a query like "read my files" and got pulled in
+# anyway. Genuinely relevant matches ran noticeably higher (0.6-1.0); this is
+# the value that cleanly separated the two in that data, not a guess -- but
+# still worth revisiting once there's a lot more real conversation to check it
+# against.
+MEMORY_MIN_SCORE = 0.55
+
 # Below this many words, skip memory + library retrieval entirely. "Yeah",
 # "okay", "no" are common and retrieval never has anything useful to say about
 # them -- it only adds ~2s of embedding latency for nothing.

@@ -6,7 +6,7 @@ import numpy as np
 
 import db
 import llm
-from config import MEMORY_TOP_K, FACT_EXTRACTION_PROMPT, PROTECTED_FACTS
+from config import MEMORY_TOP_K, MEMORY_MIN_SCORE, FACT_EXTRACTION_PROMPT, PROTECTED_FACTS
 
 
 def remember_turn(session_id: str, role: str, content: str):
@@ -65,7 +65,8 @@ def retrieve_relevant(query: str, top_k: int = MEMORY_TOP_K, query_vec=None) -> 
         scored.append((sim, row["content"], row["created_at"]))
 
     scored.sort(key=lambda x: x[0], reverse=True)
-    return [(content, ago(created)) for _, content, created in scored[:top_k]]
+    strong = [row for row in scored if row[0] >= MEMORY_MIN_SCORE]
+    return [(content, ago(created)) for _, content, created in strong[:top_k]]
 
 
 # Values a small model reaches for when it has nothing real to say. Storing any

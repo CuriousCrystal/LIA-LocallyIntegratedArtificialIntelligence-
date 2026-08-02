@@ -466,22 +466,38 @@ def handle_command(cmd: str, speaker: voice.Speaker, state: dict) -> bool:
             print(f"[volume: {level}%]\n" if level is not None else "[couldn't read the volume]\n")
 
     elif name == "/library":
-        if arg in ("scan", "refresh", "reload", "read"):
+        # A voice-triggered scan ("Lia, read my files") used to only print its
+        # result -- silent on anything you can't see, i.e. exactly when you
+        # said it out loud. Every other spoken command speaks its result; this
+        # one didn't, so it looked like she ignored the request entirely.
+        scanned = arg in ("scan", "refresh", "reload", "read")
+        chunks = 0
+        if scanned:
             try:
                 files_done, chunks = sync_library()
             except requests.RequestException:
                 print("[couldn't reach Ollama -- try again in a moment]\n")
+                speaker.say("I couldn't reach Ollama to read those just now -- try again in a moment.")
                 return True
             if not chunks:
                 print("[nothing new to read]\n")
+
         shelf = library.titles()
         if shelf:
             print("[in her library]")
             for title, count in shelf:
                 print(f"  - {title} ({count} passages)")
             print(f"  drop more files in {LIBRARY_DIR}, then /library scan\n")
+            if scanned:
+                if chunks:
+                    speaker.say(f"Done -- I read {files_done} file{'s' if files_done != 1 else ''}, "
+                                f"{chunks} passages.")
+                else:
+                    speaker.say("There wasn't anything new to read.")
         else:
             print(f"[library is empty -- put PDFs in {LIBRARY_DIR}, then /library scan]\n")
+            if scanned:
+                speaker.say("My library's empty right now -- drop some files in and ask me again.")
 
     elif name == "/voices":
         found = voice.available_voices()
@@ -572,7 +588,7 @@ def spoken_command(text: str) -> str | None:
     """
     cleaned = re.sub(r"[^a-z\s]", "", text.lower()).strip()
     words = cleaned.split()
-    if not words or len(words) > 6:
+    if not words:
         return None
 
     for command, phrases in SPOKEN_COMMANDS.items():
@@ -583,9 +599,22 @@ def spoken_command(text: str) -> str | None:
             # this used cleaned.endswith(phrase) on raw strings, and "unmute"
             # matched "mute" every time -- found by testing "unmute" and
             # getting "/volume mute" back instead of "/volume unmute".
+            #
+            # Matched anywhere in the utterance, not just at the very start or
+            # end of it, and with no length cap. A prior version only checked
+            # whether the phrase was the whole utterance, its exact prefix, or
+            # its exact suffix, and gave up past 6 words -- so a real request
+            # wrapped in context ("I've opened YouTube Music on a browser tab,
+            # can you play the music?", 14 words) was silently rejected before
+            # it ever reached a phrase check. That fell through to ordinary
+            # conversation, where the local model has no idea whether
+            # anything actually happened and confabulates "sure, playing it
+            # now" regardless -- found by testing the exact phrasing and
+            # confirming the underlying media control worked fine on its own,
+            # but was simply never being called.
             phrase_words = phrase.split()
             n = len(phrase_words)
-            if words == phrase_words or words[:n] == phrase_words or words[-n:] == phrase_words:
+            if any(words[i:i + n] == phrase_words for i in range(len(words) - n + 1)):
                 return command
     return None
 
