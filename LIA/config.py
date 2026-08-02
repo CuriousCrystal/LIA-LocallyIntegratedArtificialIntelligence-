@@ -31,7 +31,19 @@ DB_PATH = str(DATA_DIR / "lia_memory.db")
 # is 5m, which means the first thing you say after a break costs ~9s of cold
 # start instead of ~2.4s. The trade is ~2GB of VRAM held the whole time (and
 # noticeably worse battery life on a laptop). "-1" keeps them loaded forever.
+# Long on purpose. This is only a backstop now -- she explicitly releases the
+# models when a conversation ends (see RELEASE_MODELS_WHEN_IDLE), so the timer
+# only matters if she's killed before she can.
 OLLAMA_KEEP_ALIVE = "30m"
+
+# Free the ~3.7GB of VRAM as soon as a conversation closes out, instead of
+# leaving it held until the keep-alive expires. She knows when you've stopped
+# talking, which is better information than any timeout.
+RELEASE_MODELS_WHEN_IDLE = True
+
+# Start loading the model the moment you begin speaking, so the reload overlaps
+# with transcribing you rather than happening after it.
+PREWARM_ON_SPEECH = True
 
 # Context window. This matters more than it looks: Ollama defaults llama3.2 to
 # 32k, which inflates the model to 6.4GB and spills 63% of it onto the CPU on a
@@ -198,6 +210,12 @@ WAKE_WORDS = ["lia", "leah", "lea", "liya", "leia", "lya", "lija", "lya"]
 # After she answers, keep listening without the name for this long, so you can
 # just talk instead of saying "Lia" before every sentence.
 CONVERSATION_WINDOW_SECONDS = 60
+
+# Same thing after her startup greeting, but shorter. She greets the room at
+# login whether or not you're there, so a full window invites her to answer the
+# first stray noise -- but zero window means she asks how your day was and then
+# ignores you for saying "hello" back.
+GREETING_WINDOW_SECONDS = 30
 
 # Whisper size for listening: tiny.en / base.en / small.en.
 # small.en gets names right that base.en garbles ("Anaya" -> "Ania"), and the

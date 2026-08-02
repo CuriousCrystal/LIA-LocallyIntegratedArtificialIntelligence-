@@ -6,22 +6,21 @@
 # the machine. Ollama still has to be installed and running; the language model
 # is far too large to bundle.
 #
-# Takes several minutes. onnxruntime, ctranslate2 and Whisper are all big.
+# Builds into a staging folder first and swaps at the end. Lia is usually
+# installed in Startup, so a half-written dist\Lia is something Windows will
+# happily try to launch -- which fails with "Failed to import encodings module".
+# The live app stays untouched until the new one is complete.
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 Set-Location $root
 
-# A running Lia.exe locks its own files, so PyInstaller's --clean wipes the
-# folder, fails to write the new exe, and leaves you with no voices and no app.
-$running = Get-Process Lia -ErrorAction SilentlyContinue
-if ($running) {
-    Write-Host "Stopping the running Lia first..." -ForegroundColor Yellow
-    $running | Stop-Process -Force
-    Start-Sleep -Seconds 3
-}
+$dist    = Join-Path $root 'dist\Lia'
+$staging = Join-Path $root 'dist\_staging'
 
-Write-Host "Building Lia..." -ForegroundColor Cyan
+Write-Host "Building Lia (the running app stays up until this succeeds)..." -ForegroundColor Cyan
+
+if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
 
 $pyinstaller = @(
     '-m', 'PyInstaller',
@@ -29,6 +28,8 @@ $pyinstaller = @(
     '--clean',
     '--windowed',                       # no console window
     '--name', 'Lia',
+    '--distpath', $staging,
+    '--workpath', (Join-Path $root 'build'),
     '--collect-all', 'piper',           # includes espeak-ng-data
     '--collect-all', 'pysilero_vad',    # includes the VAD onnx model
     '--collect-all', 'faster_whisper',
@@ -43,34 +44,59 @@ $pyinstaller = @(
 )
 
 & python @pyinstaller
-if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
+if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed -- the existing app is untouched" }
 
-$dist = Join-Path $root 'dist\Lia'
+$new = Join-Path $staging 'Lia'
+if (-not (Test-Path (Join-Path $new 'Lia.exe'))) {
+    throw "Build produced no Lia.exe -- the existing app is untouched"
+}
 
-# Voices live beside the exe so you can still drop your own in without rebuilding.
+# Voices live beside the exe so you can drop your own in without rebuilding.
 $voicesSrc = Join-Path $PSScriptRoot 'voices'
-$voicesDst = Join-Path $dist 'voices'
-if (Test-Path $voicesSrc) {
-    Copy-Item $voicesSrc $voicesDst -Recurse -Force
-    Write-Host "Copied voices -> $voicesDst"
+if (Test-Path $voicesSrc) { Copy-Item $voicesSrc (Join-Path $new 'voices') -Recurse -Force }
+
+# Carry across whatever the live app already had, so nothing you've added or
+# said is lost in the swap.
+foreach ($keep in @('library', 'lia_memory.db')) {
+    $existing = Join-Path $dist $keep
+    $seed     = Join-Path $PSScriptRoot $keep
+    $rootSeed = Join-Path $root $keep
+    if (Test-Path $existing)      { Copy-Item $existing (Join-Path $new $keep) -Recurse -Force }
+    elseif (Test-Path $seed)      { Copy-Item $seed     (Join-Path $new $keep) -Recurse -Force }
+    elseif (Test-Path $rootSeed)  { Copy-Item $rootSeed (Join-Path $new $keep) -Recurse -Force }
 }
 
-# The library lives beside the exe too, so you can drop new PDFs in without
-# rebuilding. Only seeded if it isn't already there -- never overwrite reading
-# material you've since added.
-$libSrc = Join-Path $PSScriptRoot 'library'
-$libDst = Join-Path $dist 'library'
-if ((Test-Path $libSrc) -and -not (Test-Path $libDst)) {
-    Copy-Item $libSrc $libDst -Recurse -Force
-    Write-Host "Copied library -> $libDst"
+# --- swap: this is the only moment the app is unavailable ---
+
+$running = Get-Process Lia -ErrorAction SilentlyContinue
+if ($running) {
+    Write-Host "Stopping the running Lia to swap it..." -ForegroundColor Yellow
+    $running | Stop-Process -Force
+    Start-Sleep -Seconds 3
 }
 
-# Bring her memories along if she already has some.
-$db = Join-Path $root 'lia_memory.db'
-if ((Test-Path $db) -and -not (Test-Path (Join-Path $dist 'lia_memory.db'))) {
-    Copy-Item $db $dist
-    Write-Host "Copied lia_memory.db -> $dist"
+if (Test-Path $dist) {
+    $freed = $false
+    foreach ($attempt in 1..8) {
+        try { Remove-Item $dist -Recurse -Force -ErrorAction Stop; $freed = $true; break }
+        catch {
+            if ($attempt -eq 1) {
+                # Ollama's workers get launched as children of the app and
+                # inherit its folder, holding handles inside it.
+                Write-Host "Folder locked -- stopping Ollama workers..." -ForegroundColor Yellow
+                Get-Process llama-server, ollama -ErrorAction SilentlyContinue | Stop-Process -Force
+            }
+            Start-Sleep -Seconds 4
+        }
+    }
+    if (-not $freed) {
+        Write-Host "Could not replace dist\Lia -- the new build is waiting in dist\_staging\Lia" -ForegroundColor Red
+        exit 1
+    }
 }
+
+Move-Item $new $dist
+Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Host ""
 Write-Host "Done." -ForegroundColor Green

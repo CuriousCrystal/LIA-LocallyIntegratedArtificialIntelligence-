@@ -402,7 +402,7 @@ class Listener:
             print(f"[voice] open mic unavailable ({exc}) -- using push-to-talk.")
             return False
 
-    def _record_until_silence(self, abort=None):
+    def _record_until_silence(self, abort=None, on_speech_start=None):
         """Wait for speech, capture it, stop when they stop talking.
 
         Returns (audio, reason). reason is "speech" if we got something,
@@ -452,6 +452,8 @@ class Listener:
                 if not announced:
                     print("  [listening...]".ljust(40), end="\r", flush=True)
                     announced = True
+                    if on_speech_start is not None:
+                        on_speech_start()
 
                 silent_run = 0 if is_speech else silent_run + 1
                 if silent_run >= silence_needed:
@@ -467,16 +469,18 @@ class Listener:
             return None, "quiet"
         return np.concatenate(frames, axis=0).flatten(), "speech"
 
-    def listen_open(self, hint: str | None = None, abort=None) -> str | None:
+    def listen_open(self, hint: str | None = None, abort=None, on_speech_start=None) -> str | None:
         """Wait for them to speak, then transcribe. No key press involved.
 
         `abort` is polled between 32ms chunks so a keystroke can take over.
+        `on_speech_start` fires as soon as speech begins, which is the earliest
+        useful moment to start warming the language model.
         """
         if not self._ensure_model() or not self._ensure_vad():
             return None
 
         try:
-            audio, reason = self._record_until_silence(abort=abort)
+            audio, reason = self._record_until_silence(abort=abort, on_speech_start=on_speech_start)
         except Exception as exc:
             print(f"[voice] microphone unavailable: {exc}")
             return None

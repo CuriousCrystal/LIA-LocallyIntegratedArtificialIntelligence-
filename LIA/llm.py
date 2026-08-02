@@ -1,5 +1,6 @@
 import json
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -105,6 +106,52 @@ def chat_stream(messages: list[dict]):
             yield piece
         if chunk.get("done"):
             break
+
+
+def unload():
+    """Drop both models out of memory now.
+
+    Called when a conversation ends rather than leaving OLLAMA_KEEP_ALIVE to
+    expire on its own: she knows when you've stopped talking, so there's no
+    reason to hold ~3.7GB of VRAM waiting for a timer.
+    """
+    try:
+        requests.post(
+            f"{OLLAMA_URL}/api/chat",
+            json={"model": MODEL_CHAT, "messages": [], "keep_alive": 0},
+            timeout=30,
+        )
+        requests.post(
+            f"{OLLAMA_URL}/api/embed",
+            json={"model": MODEL_EMBED, "input": "", "keep_alive": 0},
+            timeout=30,
+        )
+    except requests.RequestException:
+        pass  # nothing to free if Ollama isn't there
+
+
+def warm_up():
+    """Start loading the chat model without waiting for it.
+
+    Fired the moment speech is detected, so the reload overlaps with
+    transcription instead of running after it.
+    """
+    def go():
+        try:
+            requests.post(
+                f"{OLLAMA_URL}/api/chat",
+                json={
+                    "model": MODEL_CHAT,
+                    "messages": [],
+                    "keep_alive": OLLAMA_KEEP_ALIVE,
+                    "options": OPTIONS,
+                },
+                timeout=120,
+            )
+        except requests.RequestException:
+            pass
+
+    threading.Thread(target=go, daemon=True).start()
 
 
 def embed(text: str) -> list[float]:

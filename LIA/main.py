@@ -36,6 +36,7 @@ from config import (
     WAKE_WORD_ENABLED,
     WAKE_WORDS,
     CONVERSATION_WINDOW_SECONDS,
+    GREETING_WINDOW_SECONDS,
     GREET_ON_START,
     LIBRARY_DIR,
     LIBRARY_AUTO_READ,
@@ -43,6 +44,8 @@ from config import (
     ECHO_MATCH_RATIO,
     BARGE_IN_MIN_WORDS,
     SPOKEN_COMMANDS,
+    RELEASE_MODELS_WHEN_IDLE,
+    PREWARM_ON_SPEECH,
 )
 
 HELP = """
@@ -266,7 +269,10 @@ class Controls:
         self.quit = threading.Event()
         self.close_now = threading.Event()
         self.speaker: "voice.Speaker | None" = None
-        self.state: dict = {}
+        # Seeded rather than empty: the tray menu reads this to draw its
+        # checkmarks, and it can be opened before the conversation loop has
+        # started up.
+        self.state: dict = {"listening": True, "open_mic": OPEN_MIC, "wake_word": WAKE_WORD_ENABLED}
 
     def stop(self):
         self.quit.set()
@@ -366,9 +372,7 @@ def accept_spoken(spoken: str, state: dict) -> str | None:
         return spoken
 
     addressed, cleaned = voice.detect_wake(spoken, WAKE_WORDS)
-    in_conversation = (
-        time.monotonic() - state.get("last_reply_at", 0.0) < CONVERSATION_WINDOW_SECONDS
-    )
+    in_conversation = time.monotonic() < state.get("window_until", 0.0)
 
     if addressed:
         return cleaned
@@ -380,6 +384,12 @@ def accept_spoken(spoken: str, state: dict) -> str | None:
 def as_instruction(text: str) -> str:
     """Turn a spoken instruction into its command form, if it is one."""
     return spoken_command(text) or text
+
+
+def prewarm():
+    """Begin loading the model as soon as you start speaking."""
+    if PREWARM_ON_SPEECH:
+        llm.warm_up()
 
 
 def speech_hint() -> str:
@@ -407,6 +417,7 @@ def read_input(
             spoken = listener.listen_open(
                 hint=speech_hint(),
                 abort=(lambda: bool(controls and (controls.quit.is_set() or controls.close_now.is_set()))),
+                on_speech_start=prewarm,
             )
             if spoken:
                 meant_for_her = accept_spoken(spoken, state)
@@ -445,7 +456,7 @@ def read_input(
     print(PROMPT_HINT, end="", flush=True)
 
     while True:
-        spoken = listener.listen_open(hint=speech_hint(), abort=keys.pending)
+        spoken = listener.listen_open(hint=speech_hint(), abort=keys.pending, on_speech_start=prewarm)
 
         typed = keys.take()
         if typed is not None:
@@ -512,12 +523,17 @@ class Session:
             return old_id, old_turns
 
 
-def close_out(session: Session) -> bool:
+def close_out(session: Session, free_memory: bool = True) -> bool:
     """Write the diary + facts for whatever has been said so far."""
     session_id, turns = session.detach()
     if not turns:
         return False
     end_session(session_id, turns)
+    if free_memory and RELEASE_MODELS_WHEN_IDLE:
+        # The conversation is over and the diary is written -- nothing more will
+        # be asked of the models until you come back, so give the VRAM up.
+        llm.unload()
+        print("[released the models -- she'll reload them when you speak]")
     return True
 
 
@@ -557,6 +573,23 @@ def main(controls: "Controls | None" = None):
     session = Session()
     headless = bool(controls and controls.headless)
 
+    speaker = voice.Speaker(enabled=SPEAK_ENABLED)
+    listener = voice.Listener() if (LISTEN_ENABLED or headless) else None
+    state = {
+        "listening": True if headless else LISTEN_ENABLED,
+        "open_mic": True if headless else OPEN_MIC,
+        "wake_word": WAKE_WORD_ENABLED,
+        "window_until": 0.0,
+    }
+    keys = None if headless else Keyboard()
+
+    # Published before anything that can block. Waiting on Ollama can take a
+    # couple of minutes at login, and until this is set the tray menu has no
+    # state to read -- which showed as Listening/Speaking sitting unchecked.
+    if controls is not None:
+        controls.speaker = speaker
+        controls.state = state
+
     # On autostart she wins the race against Ollama nearly every time.
     if not llm.is_up():
         print("[waiting for Ollama...]")
@@ -564,20 +597,6 @@ def main(controls: "Controls | None" = None):
             print("[Ollama is up]")
         else:
             print("[Ollama unreachable -- she'll keep trying as you talk to her]")
-
-    speaker = voice.Speaker(enabled=SPEAK_ENABLED)
-    listener = voice.Listener() if (LISTEN_ENABLED or headless) else None
-    state = {
-        "listening": True if headless else LISTEN_ENABLED,
-        "open_mic": True if headless else OPEN_MIC,
-        "wake_word": WAKE_WORD_ENABLED,
-        "last_reply_at": 0.0,
-    }
-    keys = None if headless else Keyboard()
-
-    if controls is not None:
-        controls.speaker = speaker
-        controls.state = state
 
     stop_watchdog = threading.Event()
     start_idle_watchdog(session, stop_watchdog)
@@ -618,9 +637,11 @@ def main(controls: "Controls | None" = None):
             print(f"LIA: {hello}\n")
             speaker.say(hello)
             speaker.wait()
-            # Deliberately does NOT open the free-conversation window. She greets
-            # the room at login whether or not anyone is there, and without the
-            # wake word she'd answer the first stray noise she heard.
+            # She just asked you something -- you shouldn't have to say her name
+            # to answer. Short window, so an empty room doesn't keep her
+            # listening to everything for a full minute.
+            state["window_until"] = time.monotonic() + GREETING_WINDOW_SECONDS
+            print(f"[answer her within {GREETING_WINDOW_SECONDS}s, or say \"Lia\" any time after]\n")
 
     pending_input: str | None = None
 
@@ -731,7 +752,7 @@ def main(controls: "Controls | None" = None):
 
         # The conversation window starts when she stops talking, not when she
         # started -- otherwise a long reply eats most of it.
-        state["last_reply_at"] = time.monotonic()
+        state["window_until"] = time.monotonic() + CONVERSATION_WINDOW_SECONDS
         pending_input = interruption
 
 
