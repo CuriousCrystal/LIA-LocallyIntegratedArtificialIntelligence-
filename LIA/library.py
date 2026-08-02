@@ -200,13 +200,18 @@ def sync(on_progress=None) -> tuple[int, int]:
 
 # --------------------------------------------------------------- retrieval ---
 
-def search(query: str, top_k: int = LIBRARY_TOP_K) -> list[tuple[str, int | None, str]]:
-    """Most relevant passages as (title, page, text)."""
+def search(query: str, top_k: int = LIBRARY_TOP_K, query_vec=None) -> list[tuple[str, int | None, str]]:
+    """Most relevant passages as (title, page, text).
+
+    `query_vec` avoids re-embedding text that memory retrieval already embedded
+    this turn -- the same sentence was otherwise sent to the embedding model
+    twice per turn.
+    """
     rows = db.all_document_chunks()
     if not rows:
         return []
 
-    query_vec = np.array(llm.embed(query))
+    query_vec = np.array(query_vec) if query_vec is not None else np.array(llm.embed(query))
     query_norm = np.linalg.norm(query_vec) or 1e-8
 
     scored = []

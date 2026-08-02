@@ -214,6 +214,64 @@ A(table([
     ["Returning cold", "2.9s", "6.9s"],
 ], [55, 55, 55]))
 
+A(H2("A real latency bug, found by measuring rather than guessing"))
+A(P("Asked to look into reply latency, the actual per-turn cost was measured rather than assumed: "
+    "silence detection (0.9s), Whisper transcription (~1.9s), then a genuine bug &mdash; <b>the same "
+    "sentence was being embedded twice</b>, once for memory recall and once for library search, at "
+    "~2.2s each. Fixed by sharing one embedding call between both, and by skipping retrieval entirely "
+    "for short replies (\"yeah\", \"okay\") where a 2-second lookup never had anything to return anyway."))
+A(P("Separately, she was addressing the person by name in nearly every reply because the system "
+    "prompt said <i>\u201cAddress them as {name}\u201d</i> and she took it literally. Softened to prefer "
+    "\u201cyou\u201d, the name held back for the start of a conversation or something that matters."))
+
+A(H2("The one deliberate exception to offline"))
+A(P("Everything up to this point works with zero internet connection, by design. Two narrow, "
+    "explicit, optional additions:"))
+A(bullets([
+    "<b>Weather</b> &mdash; a live source (Open-Meteo), geolocated from IP, no API key needed at all. "
+    "Answered directly from data rather than asked of any LLM, which would only guess.",
+    "<b>\u201cLook that up\u201d</b> &mdash; a factual question, answered online only when explicitly asked. "
+    "Two providers: <b>Groq</b> is fast but is just a bigger version of the same kind of model running "
+    "locally &mdash; a plain chat-completions call to it has no more access to today's news than the "
+    "local model does either. <b>OpenRouter</b>, with its <font face='Courier'>:online</font> mode, "
+    "runs an actual web search first &mdash; verified with a real, current, cited answer (a 2025 "
+    "sporting result) that neither the local model nor a plain Groq call could have known from "
+    "training data. Preferred automatically when both are configured.",
+]))
+A(table([
+    ["Path", "Measured latency", "Note"],
+    ["Weather", "~1.2s", "no LLM involved"],
+    ["Connectivity check", "~0.3s", "run before anything else"],
+    ["Groq lookup", "0.4\u20130.8s", "fast, but guesses"],
+    ["OpenRouter (:online)", "2.4\u20134.0s", "slower, because it actually searches"],
+], [55, 45, 65]))
+A(P("Trigger-phrase detection for both runs on every ordinary turn, measured at 0.002ms per turn "
+    "&mdash; confirmed to add no perceptible cost to conversation that never touches either feature.", "LiaNote"))
+
+A(H2("Windows media control"))
+A(P("Built against System Media Transport Controls &mdash; the same system behind the taskbar's media "
+    "flyout and hardware media keys &mdash; rather than integrating one specific player. This means it "
+    "works with whatever is actually playing (Spotify, a browser tab, Windows Media Player) without "
+    "Lia needing to know which. Verified against a real, live session already running on the machine."))
+
+A(H2("A second voice engine: KittenTTS"))
+A(P("Investigating a set of voice model files (KittenTTS, CPU-only, 25\u201380MB, its own voice set "
+    "including \u201cBella\u201d) surfaced three separate upstream packaging bugs before it worked at all:"))
+A(bullets([
+    "The released wheel's own metadata demands a dependency version that doesn't exist on PyPI "
+    "(<font face='Courier'>misaki&gt;=0.9.4</font>, latest published is 0.7.4) &mdash; worked around with "
+    "<font face='Courier'>--no-deps</font> plus installing the real dependencies by hand.",
+    "That dependency hardcodes a Windows path to a system-wide eSpeak install "
+    "(<font face='Courier'>C:\\Program Files\\eSpeak NG\\...</font>) that essentially nobody has, and never "
+    "checks the package that already bundles a working copy.",
+    "That bundled copy's own data directory path is baked in from the CI machine that built it "
+    "&mdash; also wrong on this machine.",
+]))
+A(P("Both path issues were fixed by pointing the phonemizer's library loader at the real bundled "
+    "files directly. Verified working end to end &mdash; audio played through real speakers, then "
+    "through the full sentence-chunked conversation loop. Left inactive by default: the confirmed "
+    "voice preference (Piper's \u201camy\u201d) was not switched without being asked to."))
+
 A(PageBreak())
 
 # ------------------------------------------------------------- limitations ---
@@ -237,7 +295,8 @@ A(P("Speaker-filtered retrieval removed the largest source of invented memories,
 A(H2("Open items"))
 A(bullets([
     "<b>No way to forget.</b> Every turn is stored in plain text with no expiry and no <font face='Courier'>/forget</font>. "
-    "This matters most now that she starts at login.",
+    "This matters most now that she starts at login, and now that an optional path exists for a "
+    "question to leave the machine at all.",
     "<b>Duplicate facts.</b> Keys drift — <font face='Courier'>sister_name</font> and "
     "<font face='Courier'>visiting_sister_name</font> both existed for the same person. Nothing merges them.",
     "<b>Wake word still transcribes everything.</b> She only <i>responds</i> to her name, but she processes "
@@ -246,6 +305,11 @@ A(bullets([
     "quietly got worse.",
     "<b>Whole-document questions.</b> She retrieves passages, not books. “Summarise this 300-page PDF” "
     "will not work; “what does it say about X” will.",
+    "<b>The packaged app carries ~77MB it doesn't need.</b> Something pulled <font face='Courier'>spacy</font> "
+    "into the frozen build even though the default voice engine (Piper) never imports it — not "
+    "chased down yet, doesn't break anything, just dead weight.",
+    "<b>Music playback control is Windows-only.</b> Built against System Media Transport Controls, "
+    "which has no equivalent on other platforms.",
 ]))
 
 A(H2("Scanned PDFs"))
@@ -273,8 +337,14 @@ A(table([
     ["ECHO_MATCH_RATIO", "0.5", "She ignores you while talking (raise it)"],
     ["WHISPER_MODEL", "small.en", "Names come out wrong (go bigger)"],
     ["VOICE_NAME", "en_US-amy-medium", "You want a different voice"],
+    ["VOICE_ENGINE", "piper", "\"kitten\" for a second, smaller voice set (Bella and others)"],
     ["LIBRARY_AUTO_READ", "False", "You want documents read without asking"],
+    ["RETRIEVAL_MIN_WORDS", "3", "Short replies still feel slow (raise it), or memory feels thin (lower it)"],
+    ["OPENROUTER_ONLINE", "True", "Live search on \"look that up\" instead of a guess"],
 ], [56, 34, 75]))
+A(P("Both <font face='Courier'>GROQ_API_KEY</font> and <font face='Courier'>OPENROUTER_API_KEY</font> "
+    "are read from environment variables, never from this file — set with "
+    "<font face='Courier'>[Environment]::SetEnvironmentVariable(...)</font>, not by editing config.py.", "LiaNote"))
 
 A(H2("Rebuilding the app"))
 A(code("powershell -ExecutionPolicy Bypass -File LIA\\build_exe.ps1\n"

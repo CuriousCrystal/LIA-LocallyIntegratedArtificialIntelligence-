@@ -32,6 +32,9 @@ from config import (
     VOICE_NOISE_SCALE,
     VOICE_NOISE_W,
     SYSTEM_VOICE_MATCH,
+    VOICE_ENGINE,
+    KITTEN_VOICE_NAME,
+    KITTEN_MODEL,
     WHISPER_MODEL,
     VAD_THRESHOLD,
     VAD_SILENCE_SECONDS,
@@ -148,6 +151,55 @@ class PiperEngine:
             _play(np.concatenate(chunks), self.sample_rate)
 
 
+class KittenEngine:
+    """KittenTTS -- a second, much smaller local TTS engine (25-80MB, CPU-only)
+    with its own distinct voice set, entirely separate from Piper's.
+
+    Two upstream packaging bugs, worked around here rather than upstream:
+
+    1. `misaki` (KittenTTS's phonemizer) hardcodes a Windows path to a
+       system-wide eSpeak NG install (`C:\\Program Files\\eSpeak NG\\...`) that
+       essentially nobody has. `espeakng_loader` already bundles a working
+       copy; pointing EspeakWrapper at it directly skips misaki's broken
+       autodetection.
+    2. The bundled eSpeak DLL itself has its data directory path baked in from
+       the CI machine that built it (`D:/a/espeakng-loader/...`), which
+       doesn't exist on this machine either. `set_data_path` overrides it.
+    """
+
+    _KNOWN_VOICES = {"Bella", "Jasper", "Luna", "Bruno", "Rosie", "Hugo", "Kiki", "Leo"}
+
+    def __init__(self, voice_name: str = KITTEN_VOICE_NAME, model_id: str = KITTEN_MODEL):
+        import espeakng_loader
+        from phonemizer.backend.espeak.wrapper import EspeakWrapper
+
+        EspeakWrapper.set_library(espeakng_loader.get_library_path())
+        EspeakWrapper.set_data_path(espeakng_loader.get_data_path())
+
+        from kittentts import KittenTTS
+
+        if voice_name not in self._KNOWN_VOICES:
+            print(f"[voice] '{voice_name}' isn't a Kitten voice, using Bella. "
+                  f"Choices: {', '.join(sorted(self._KNOWN_VOICES))}")
+            voice_name = "Bella"
+
+        self.name = f"kitten:{voice_name}"
+        self._voice_name = voice_name
+        self._model = KittenTTS(model_id)
+        self.sample_rate = 24000
+
+    def say(self, text: str):
+        import contextlib
+        import io
+
+        # KittenTTS's generate() hardcodes a print() of the input text on every
+        # call, with no way to turn it off -- swallow it rather than let it
+        # interleave with our own status lines mid-sentence.
+        with contextlib.redirect_stdout(io.StringIO()):
+            audio = self._model.generate(text, voice=self._voice_name)
+        _play(audio, self.sample_rate)
+
+
 class SystemEngine:
     """Built-in Windows SAPI voice. Always available, no downloads."""
 
@@ -174,13 +226,19 @@ class SystemEngine:
 
 def _build_engine():
     """Best available engine, or None if the machine can't speak at all."""
-    model_path = _resolve_voice_file()
-
-    if model_path is not None:
+    if VOICE_ENGINE == "kitten":
         try:
-            return PiperEngine(model_path)
+            return KittenEngine()
         except Exception as exc:
-            print(f"[voice] couldn't load {model_path.name}: {exc}")
+            print(f"[voice] couldn't load Kitten voice '{KITTEN_VOICE_NAME}': {exc}")
+
+    elif VOICE_ENGINE == "piper":
+        model_path = _resolve_voice_file()
+        if model_path is not None:
+            try:
+                return PiperEngine(model_path)
+            except Exception as exc:
+                print(f"[voice] couldn't load {model_path.name}: {exc}")
 
     try:
         return SystemEngine()

@@ -82,10 +82,20 @@ A(table([
     ["“Lia, be quiet”  <br/>“Lia, stop talking”", "Stop speaking out loud (she still listens)"],
     ["“Lia, you can talk”", "Start speaking again"],
     ["“Lia, read my files”", "Read documents you've given her"],
+    ["“Play music” / “pause music”  <br/>“next song” / “previous song”", "Control whatever's playing on the computer"],
 ], [62, 103]))
 
 A(P("Everything else you say she treats as conversation, so you can talk about stopping, sleeping "
     "or being quiet without accidentally switching her off."))
+
+A(H2("The weather, and looking things up"))
+A(P("Ask <b>“what's the weather like”</b> and she'll check, using your general location — no setup "
+    "needed for this one."))
+A(P("Ask her to <b>“look that up”</b> for anything else — a fact, a question she isn't sure about "
+    "— and, if she's set up with an internet connection for this, she'll actually check rather than "
+    "guess. If that hasn't been set up, she'll say so plainly rather than pretending to know."))
+A(P("Everything else about her stays completely private and offline. This is the one deliberate, "
+    "narrow exception, and only for what you explicitly ask her to check.", "LiaNote"))
 
 A(H2("Using the orange dot"))
 A(P("Right-click the orange dot for the same controls, plus a few more:"))
@@ -163,8 +173,9 @@ A(bullets([
     "If something sounds off, it probably is. Say so, and she'll correct.",
     "<b>Anything needing exact precision.</b> Spelling things out letter by letter, codes, arithmetic, "
     "counting. She gets these wrong confidently, even when told the right answer.",
-    "<b>Anything outside this computer.</b> No web, no weather, no news, no email. She only knows what "
-    "she was built with, what you've told her, and what you've given her to read.",
+    "<b>Mostly nothing outside this computer.</b> No email, no browsing, no apps. Weather and "
+    "explicitly-asked-for lookups are the one deliberate exception — everything else she knows comes "
+    "from what she was built with, what you've told her, and what you've given her to read.",
     "<b>She isn't a doctor or a therapist.</b> She's good company and she'll listen. That's a different "
     "thing, and she's told not to pretend otherwise.",
 ]))

@@ -40,17 +40,21 @@ def ago(timestamp: str) -> str:
     return f"{days // 30} months ago"
 
 
-def retrieve_relevant(query: str, top_k: int = MEMORY_TOP_K) -> list[tuple[str, str]]:
+def retrieve_relevant(query: str, top_k: int = MEMORY_TOP_K, query_vec=None) -> list[tuple[str, str]]:
     """Most semantically similar things the person has said, newest scoring ties first.
 
     Returns (content, when) pairs. Only their turns are searched -- see
     db.all_memories().
+
+    `query_vec` lets a caller that already embedded this turn's text (for the
+    library search, say) hand it over instead of paying for a second identical
+    embedding call.
     """
     rows = db.all_memories(role="user")
     if not rows:
         return []
 
-    query_vec = np.array(llm.embed(query))
+    query_vec = np.array(query_vec) if query_vec is not None else np.array(llm.embed(query))
     query_norm = np.linalg.norm(query_vec) or 1e-8
 
     scored = []

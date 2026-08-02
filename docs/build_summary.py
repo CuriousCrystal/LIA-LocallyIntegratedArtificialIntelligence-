@@ -6,6 +6,7 @@ Timestamps and tool counts are read from the real Claude Code session log; the
 summaries are written.
 """
 
+import datetime as dt
 from pathlib import Path
 
 from reportlab.lib import colors
@@ -124,6 +125,43 @@ SUMMARIES = {
          "Found Claude Code's own session log on disk and generated a 47-page transcript from the real "
          "record rather than from memory."),
     35: ("I wanted that summarised.", "This document."),
+    36: ("(switched model to Fable 5)", "&mdash;"),
+    37: ("(command output)", "&mdash;"),
+    38: ("Three things: replies feel slow, she should say \"you\" rather than the name every "
+        "time, and whether to add Groq for internet access given an unreliable connection.",
+        "Measured the real per-turn cost and found a genuine bug: the same sentence was being "
+        "embedded <b>twice</b> per turn (memory and library lookups). Fixed by sharing one "
+        "embedding call, and skipping retrieval entirely on short replies like \"yeah\". Softened "
+        "the system prompt to prefer \"you\". Built weather (Open-Meteo, no key needed) and an "
+        "online-lookup path via Groq &mdash; with the honest caveat that a plain Groq call has no "
+        "more live internet access than the local model does either."),
+    39: ("(switched model to Opus 5)", "&mdash;"),
+    40: ("(command output)", "&mdash;"),
+    41: ("Handed over a Groq key, confirmed the media player is just \"Windows,\" and asked "
+        "about adding custom voice files.",
+        "Set the key as a Windows environment variable, never in a file. While wiring it in, "
+        "found the key had been pasted directly into <font face='Courier'>internet.py</font> and "
+        "something had already stripped it back out, leaving broken syntax that would have "
+        "crashed the whole app on next launch &mdash; fixed and verified. Built Windows media "
+        "control (play/pause/skip/now-playing) via System Media Transport Controls, verified "
+        "against a real session already running on the machine."),
+    42: ("Asked whether voice model files could be used, and whether an OpenRouter key would "
+        "help &mdash; then linked KittenTTS specifically for its \"Bella\" voice.",
+        "Built OpenRouter support: with both keys present she now prefers OpenRouter's "
+        "<font face='Courier'>:online</font> mode &mdash; a genuine web search &mdash; over Groq's "
+        "plain guess. Getting Bella working meant fixing three separate upstream packaging bugs "
+        "in KittenTTS (a required dependency version that doesn't exist on PyPI, a hardcoded "
+        "Windows path to eSpeak, a data path baked in from the CI machine that built it). Verified "
+        "working end to end, but left the active voice on amy since that was already the "
+        "confirmed choice."),
+    43: ("Provided the OpenRouter key, confirmed amy as the voice, and asked for a latency "
+        "check plus updated PDFs.",
+        "Verified OpenRouter's live search with a real, current, cited answer a local or "
+        "Groq-only model couldn't have known. Measured all four internet paths cleanly: weather "
+        "~1.2s, connectivity check ~0.3s, Groq ~0.4&ndash;0.8s (fast, guesses), OpenRouter "
+        "~2.4&ndash;4.0s (slower, because it's actually searching). Confirmed the new trigger "
+        "checks add no measurable cost to ordinary conversation. This document, and the three "
+        "others."),
 }
 
 PHASES = {
@@ -133,6 +171,7 @@ PHASES = {
     19: "Making her yours",
     26: "Fixing what the real world broke",
     32: "Writing it down",
+    38: "Connecting her to the world",
 }
 
 
@@ -170,11 +209,15 @@ def main():
                    "log; the full wording is in <i>Lia — Session Transcript</i>."))
 
     total = sum(len(e["tools"]) for e in exchanges)
+    start_dt = dt.datetime.fromisoformat(exchanges[0]["ts"].replace("Z", "+00:00"))
+    end_dt = dt.datetime.fromisoformat(exchanges[-1]["ts"].replace("Z", "+00:00"))
+    elapsed_hours = (end_dt - start_dt).total_seconds() / 3600
+
     story.append(Table(
         [[Paragraph(f"<b>{len(exchanges)}</b><br/><font size='8' color='#6b6672'>exchanges</font>", S["LiaCell"]),
           Paragraph(f"<b>{total}</b><br/><font size='8' color='#6b6672'>tool calls</font>", S["LiaCell"]),
           Paragraph(f"<b>{when(exchanges[0]['ts'])}</b><br/><font size='8' color='#6b6672'>started</font>", S["LiaCell"]),
-          Paragraph(f"<b>~21 hrs</b><br/><font size='8' color='#6b6672'>elapsed</font>", S["LiaCell"])]],
+          Paragraph(f"<b>~{elapsed_hours:.0f} hrs</b><br/><font size='8' color='#6b6672'>elapsed</font>", S["LiaCell"])]],
         colWidths=[41 * mm] * 4,
         style=TableStyle([
             ("LINEABOVE", (0, 0), (-1, 0), 1, ACCENT),
@@ -195,9 +238,11 @@ def main():
     story.append(callout(
         "A companion that starts at login, greets you by name, listens on an open mic, answers out "
         "loud, remembers across days, reads what you hand her, and never sends a word off the "
-        "machine. <b>2,557 lines, nine modules.</b><br/><br/>"
+        "machine &mdash; except the one narrow, optional exception she'll now admit to: weather, "
+        "and a question you explicitly ask her to look up online. Eleven modules.<br/><br/>"
         "Still open: no way to forget, she still occasionally invents small details, fact keys drift, "
-        "and there are no tests — which matters because every real bug here was silent."))
+        "there are no tests, and the packaged app is carrying ~77MB of a dependency "
+        "(<font face='Courier'>spacy</font>) that nothing in it actually needs by default."))
 
     build(HERE / "Lia - Session Summary.pdf",
           "Lia — Session Summary",

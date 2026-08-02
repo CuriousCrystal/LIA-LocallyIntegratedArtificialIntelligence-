@@ -1,7 +1,10 @@
 # LIA — Locally Integrated Artificial Intelligence
 
-A companion that runs entirely on your machine. No API keys, no accounts, and
-nothing leaves the laptop once the models are pulled.
+A companion that runs entirely on your machine. No accounts, and nothing leaves
+the laptop once the models are pulled — with one deliberate, narrow exception:
+if you give her an API key, she can check the weather and look things up
+online. See [Weather, lookups and music](#weather-lookups-and-music). Leave
+those keys unset and she never touches the internet at all.
 
 ## Setup
 
@@ -105,6 +108,46 @@ about something specific and she'll find it; ask her to summarise a 300-page boo
 and she'll only see the few passages that matched. Indexing costs about half a
 second per passage, once per file. Scanned PDFs won't work — there's no OCR.
 
+## Weather, lookups and music
+
+The one deliberate exception to running fully offline — narrow on purpose, and
+entirely optional. With no keys set, none of this activates and she never
+makes a network call beyond talking to Ollama on your own machine.
+
+**Weather** needs no key at all. Say *"what's the weather like"* and she checks
+a live source (Open-Meteo) and answers in her own voice, geolocated from your
+IP automatically.
+
+**"Look that up"** answers a factual question from the internet instead of
+guessing from what a 3B local model already knows. Needs one of:
+
+```powershell
+[Environment]::SetEnvironmentVariable('GROQ_API_KEY', 'your-key', 'User')
+[Environment]::SetEnvironmentVariable('OPENROUTER_API_KEY', 'your-key', 'User')
+```
+
+Set as environment variables, never pasted into a file — `config.py` only ever
+reads them via `os.environ.get(...)`. Restart her after setting one so the new
+process picks it up.
+
+If both are set, **OpenRouter is tried first**, because with
+`OPENROUTER_ONLINE = True` (the default) it appends `:online` to the model
+name, which makes OpenRouter run an actual web search before answering — a
+real current answer, not a fluent guess. Groq is fast but is just a bigger
+version of the same kind of model Lia already runs locally; a plain
+chat-completions call to it has no more access to today's news than she does
+already. It's the fallback, or the option if that's the only key you have.
+
+**Music** needs nothing at all — it uses Windows' own System Media Transport
+Controls, the same thing behind your keyboard's media keys, so it works with
+whatever's actually playing (Spotify, a browser tab, Windows Media Player)
+without her needing to know which:
+
+```
+"play music" / "pause music" / "next song" / "previous song"
+"what song is this" / "what's playing"
+```
+
 ## How she remembers
 
 Three layers, all in `lia_memory.db` (plain SQLite, in the project root — inspect
@@ -134,6 +177,8 @@ she'd never learn anything.
 | `main.py` | the conversation loop |
 | `app.py` | tray app wrapper for running her in the background |
 | `library.py` | reads PDFs and notes you drop in `library/` |
+| `internet.py` | the one deliberate offline exception — weather, and online lookups |
+| `media.py` | Windows media control (SMTC) — play/pause/skip/now playing |
 | `voices/` | drop your own voice files here — see `voices/README.md` |
 | `library/` | drop PDFs here — see `library/README.md` |
 
@@ -148,10 +193,13 @@ she'd never learn anything.
 | `MIC_SETTLE_SECONDS` | raise if she answers her own voice (headphones fix this outright) |
 | `WHISPER_MODEL` | `small.en` gets names right that `base.en` garbles |
 | `IDLE_MINUTES` | how long a silence ends the conversation |
+| `VOICE_ENGINE` | `"piper"` (default) / `"kitten"` for a second, smaller voice set / `"system"` |
+| `RETRIEVAL_MIN_WORDS` | skips memory/library lookup below this many words — raise it if short replies still feel slow |
+| `OPENROUTER_ONLINE` | live web search on "look that up", instead of a guess — see `internet.py` |
 
 ## Not built yet
 
-- A wake word, so she isn't listening to every conversation in the room
-- Barge-in — interrupting her by talking rather than Ctrl+C
 - Merging duplicate facts (`sister_name` and `visiting_sister_name` both exist)
 - Any way to make her forget something
+- Voice cloning from a short recording — see [`voices/README.md`](voices/README.md#cloning-a-specific-persons-voice)
+- Music playback control on anything but Windows

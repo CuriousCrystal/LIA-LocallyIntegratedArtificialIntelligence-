@@ -21,8 +21,10 @@ import requests
 
 import db
 import diary
+import internet
 import library
 import llm
+import media
 import memory
 import voice
 from config import (
@@ -46,6 +48,10 @@ from config import (
     SPOKEN_COMMANDS,
     RELEASE_MODELS_WHEN_IDLE,
     PREWARM_ON_SPEECH,
+    RETRIEVAL_MIN_WORDS,
+    WEATHER_TRIGGER_WORDS,
+    INTERNET_TRIGGER_PHRASES,
+    MEDIA_TRIGGER_PHRASES,
 )
 
 HELP = """
@@ -53,6 +59,7 @@ HELP = """
   /mic on|off     listen to you at all
   /openmic on|off open mic (just talk) vs push-to-talk (Enter to record)
   /wake on|off    only answer when you say her name
+  /media play|pause|next|previous   control whatever's playing on Windows
   /library [scan] what she has read; 'scan' picks up new files
   /voices         list voices found in LIA/voices/
   /help           this list
@@ -82,7 +89,10 @@ def build_system_message() -> dict:
     name = facts.get("name")
     if name:
         content += (
-            f"\n\nThe person you are talking with is called {name}. Address them as {name}."
+            f"\n\nThe person you are talking with is called {name}. You may use their name "
+            f"occasionally, the way a friend does -- at the start of a conversation, or to land "
+            f"something important. Most replies should just say \"you\", the way people actually "
+            f"talk; using their name in every single reply reads as stiff and repetitive, not warm."
             f" If anything in your memories or notes uses a different name for them, it is out"
             f" of date -- they are {name} now."
         )
@@ -95,8 +105,8 @@ def build_system_message() -> dict:
     return {"role": "system", "content": content}
 
 
-def build_memory_context(user_input: str) -> dict | None:
-    relevant = memory.retrieve_relevant(user_input)
+def build_memory_context(user_input: str, query_vec=None) -> dict | None:
+    relevant = memory.retrieve_relevant(user_input, query_vec=query_vec)
     if not relevant:
         return None
 
@@ -112,10 +122,91 @@ def build_memory_context(user_input: str) -> dict | None:
     }
 
 
-def build_library_context(user_input: str) -> dict | None:
+def build_media_context(user_input: str) -> dict | None:
+    """What's currently playing, if they asked -- entirely local, no network."""
+    if not media.available():
+        return None
+    lowered = user_input.lower()
+    if not any(p in lowered for p in MEDIA_TRIGGER_PHRASES):
+        return None
+
+    info = media.now_playing()
+    if not info or not (info["title"] or info["artist"]):
+        return {
+            "role": "system",
+            "content": "They just asked what's playing, but nothing seems to be playing right "
+                       "now. Say so naturally.",
+        }
+    return {
+        "role": "system",
+        "content": f"Currently playing on their computer: \"{info['title']}\" by "
+                   f"{info['artist'] or 'an unknown artist'}. Answer naturally, as though you "
+                   f"noticed it yourself.",
+    }
+
+
+def build_internet_context(user_input: str) -> dict | None:
+    """Weather or a looked-up answer, if the input asks for one and she's online.
+
+    Kept as a system note she phrases in her own words, same as the library --
+    she's told plainly where it came from and not to pretend it's her own
+    knowledge or something you told her.
+    """
+    lowered = user_input.lower()
+
+    if any(w in lowered for w in WEATHER_TRIGGER_WORDS):
+        if not internet.is_online():
+            return {
+                "role": "system",
+                "content": "They just asked about the weather. You have no internet connection "
+                           "right now -- say so plainly and naturally, don't guess at an answer.",
+            }
+        report = internet.get_weather()
+        if report is None:
+            return {
+                "role": "system",
+                "content": "They just asked about the weather. The weather service didn't "
+                           "respond -- say you couldn't check just now, don't guess.",
+            }
+        return {
+            "role": "system",
+            "content": f"Live weather right now: {report}. This is current, from a weather "
+                       f"service, not something you already knew -- answer naturally, as "
+                       f"though you just glanced outside for them.",
+        }
+
+    if any(p in lowered for p in INTERNET_TRIGGER_PHRASES):
+        if not internet.is_online():
+            return {
+                "role": "system",
+                "content": "They asked you to look something up, but you have no internet "
+                           "connection right now. Say so plainly rather than guessing or "
+                           "pretending to have checked.",
+            }
+        found = internet.look_up(user_input)
+        if found is None:
+            return {
+                "role": "system",
+                "content": "They asked you to look something up, but the lookup didn't work "
+                           "(no key set, or the request failed). Say you couldn't check "
+                           "rather than guessing.",
+            }
+        answer, was_live_search = found
+        source = "a live web search just now" if was_live_search else "a quick online question just now"
+        return {
+            "role": "system",
+            "content": f"You looked this up online and found: {answer}\n\nThis came from {source}, "
+                       f"not from memory or something they told you -- say so if it's relevant, "
+                       f"and answer naturally in your own voice.",
+        }
+
+    return None
+
+
+def build_library_context(user_input: str, query_vec=None) -> dict | None:
     """Passages from your documents that bear on what you just asked."""
     try:
-        found = library.search(user_input)
+        found = library.search(user_input, query_vec=query_vec)
     except requests.RequestException:
         return None
     if not found:
@@ -219,6 +310,25 @@ def handle_command(cmd: str, speaker: voice.Speaker, state: dict) -> bool:
             print(f"[say \"Lia\" to get her attention -- then {CONVERSATION_WINDOW_SECONDS}s of free conversation]\n")
         else:
             print("[wake word off -- she answers anything she hears]\n")
+
+    elif name == "/media":
+        if not media.available():
+            print("[media control isn't available -- see LIA/media.py]\n")
+        elif arg == "play":
+            print("[playing]\n" if media.play() else "[couldn't find anything to play]\n")
+        elif arg == "pause":
+            print("[paused]\n" if media.pause() else "[nothing seems to be playing]\n")
+        elif arg == "next":
+            print("[skipped]\n" if media.next_track() else "[couldn't skip -- nothing playing?]\n")
+        elif arg == "previous":
+            print("[went back a track]\n" if media.previous_track() else "[couldn't go back]\n")
+        else:
+            info = media.now_playing()
+            if info and (info["title"] or info["artist"]):
+                state_word = "playing" if info["playing"] else "paused"
+                print(f"[{state_word}: {info['title']} -- {info['artist']}]\n")
+            else:
+                print("[nothing seems to be playing]\n")
 
     elif name == "/library":
         if arg in ("scan", "refresh", "reload", "read"):
@@ -688,15 +798,34 @@ def main(controls: "Controls | None" = None):
 
         messages = [build_system_message()]
 
-        status("remembering")
-        mem_context = build_memory_context(user_input)
-        if mem_context:
-            messages.append(mem_context)
+        net_context = build_internet_context(user_input)
+        if net_context:
+            messages.append(net_context)
 
-        status("checking her reading")
-        lib_context = build_library_context(user_input)
-        if lib_context:
-            messages.append(lib_context)
+        media_context = build_media_context(user_input)
+        if media_context:
+            messages.append(media_context)
+
+        # Short acknowledgements ("yeah", "okay", "no") are common and retrieval
+        # never has anything useful to say about them -- skip the ~2s embedding
+        # call entirely rather than spend it for nothing.
+        if len(user_input.split()) >= RETRIEVAL_MIN_WORDS:
+            status("remembering")
+            # Embedded once and reused for both searches -- these used to each
+            # embed the same sentence separately, paying for it twice a turn.
+            try:
+                query_vec = llm.embed(user_input)
+            except requests.RequestException:
+                query_vec = None
+
+            mem_context = build_memory_context(user_input, query_vec=query_vec)
+            if mem_context:
+                messages.append(mem_context)
+
+            status("checking her reading")
+            lib_context = build_library_context(user_input, query_vec=query_vec)
+            if lib_context:
+                messages.append(lib_context)
 
         messages.extend(session.recent(SHORT_TERM_TURNS))
         messages.append({"role": "user", "content": user_input})

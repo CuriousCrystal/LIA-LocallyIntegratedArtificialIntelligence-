@@ -3,6 +3,7 @@ Central config for LIA (Locally Integrated Artificial Intelligence).
 Change MODEL_CHAT / MODEL_EMBED here if you swap models later.
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -64,6 +65,11 @@ SHORT_TERM_TURNS = 8
 # How many retrieved long-term memories to inject per turn.
 MEMORY_TOP_K = 4
 
+# Below this many words, skip memory + library retrieval entirely. "Yeah",
+# "okay", "no" are common and retrieval never has anything useful to say about
+# them -- it only adds ~2s of embedding latency for nothing.
+RETRIEVAL_MIN_WORDS = 3
+
 
 # ---------------------------------------------------------------- voice ----
 # Lia speaks her replies out loud.
@@ -95,6 +101,18 @@ VOICE_NOISE_W = 0.8
 # Which Windows SAPI voice to use when falling back (substring match, or None).
 SYSTEM_VOICE_MATCH = "Zira"
 
+# Which engine speaks. "piper" is the one VOICE_NAME/VOICES_DIR above apply to.
+# "kitten" is a second, distinct local engine -- KittenTTS, CPU-only, its own
+# voices (Bella, Jasper, Luna, Bruno, Rosie, Hugo, Kiki, Leo) -- with its own
+# VOICE_NAME meaning down below. "system" forces the Windows fallback.
+VOICE_ENGINE = "piper"
+
+# Only read when VOICE_ENGINE = "kitten". One of the names above; anything
+# else falls back to Bella. First use downloads the model from Hugging Face
+# (~80MB for "mini", cached afterwards).
+KITTEN_VOICE_NAME = "Bella"
+KITTEN_MODEL = "KittenML/kitten-tts-mini-0.8"
+
 # Open mic: she listens continuously and answers when you stop talking, instead
 # of waiting for you to press Enter. Set False to go back to push-to-talk.
 OPEN_MIC = True
@@ -122,6 +140,54 @@ MIC_SETTLE_SECONDS = 0.4
 # re-derived from old transcripts -- without this, one stray mention of a former
 # name silently reverts it.
 PROTECTED_FACTS = {"name", "preferred_address"}
+
+# --- internet (the one deliberate exception to fully offline) ---
+# Everything above this line works with zero internet connection, by design.
+# This adds one narrow, explicit exception: weather, and a factual question you
+# ask her to look up. Ordinary conversation never touches it and never leaves
+# the machine -- see internet.py for exactly what does and doesn't.
+INTERNET_ENABLED = True
+
+# Read from the environment, never hardcoded here -- get a free key at
+# https://console.groq.com. With no key set, "look that up" just tells you
+# plainly that she can't check right now, same as everything else that needs
+# a connection she doesn't have.
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_MODEL = "llama-3.3-70b-versatile"
+
+# OpenRouter proxies many hosted models behind one OpenAI-compatible API. Set
+# OPENROUTER_ONLINE and it appends ":online" to the model name, which makes
+# OpenRouter run an actual web search before answering -- unlike a plain Groq
+# completion, this genuinely can answer something that happened yesterday.
+# Tried first when both keys are present, since a real search beats a guess.
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+OPENROUTER_MODEL = "openai/gpt-4o-mini"
+OPENROUTER_ONLINE = True
+
+# Say any of these and, if she's online, she answers from Groq instead of
+# guessing from what a 3B local model already knows.
+INTERNET_TRIGGER_PHRASES = [
+    "look that up", "look this up", "look it up", "search online",
+    "search the internet", "check online", "google that", "google it",
+]
+
+# Weather is answered from a live source directly -- Open-Meteo, no API key
+# needed -- rather than asked of any LLM, local or Groq, which would only guess.
+WEATHER_TRIGGER_WORDS = [
+    "weather", "is it raining", "is it going to rain", "forecast",
+    "how hot is it", "how cold is it", "temperature outside",
+]
+
+# Leave both None to auto-detect from your IP (free, no signup). Set them if
+# that ever gets it wrong -- a VPN, for instance.
+WEATHER_LAT = None
+WEATHER_LON = None
+
+# --- media (local, not internet -- controls whatever Windows says is playing) ---
+MEDIA_TRIGGER_PHRASES = [
+    "what song is this", "what's playing", "who sings this", "who is this",
+    "what is this song", "what track is this",
+]
 
 # --- library ---
 # A folder you can hand her a document through. Put a PDF in here and ask her to
@@ -190,6 +256,10 @@ SPOKEN_COMMANDS = {
     "/voice on": ["you can talk", "start talking", "unmute"],
     "/wake off": ["listen to everything"],
     "/wake on": ["only answer to your name"],
+    "/media play": ["play music", "play the music", "resume music", "resume the music", "play song"],
+    "/media pause": ["pause music", "pause the music", "stop the music", "stop music"],
+    "/media next": ["next song", "skip song", "skip this song", "play the next song", "next track"],
+    "/media previous": ["previous song", "go back a song", "last song", "previous track"],
     "/library scan": [
         "read my files", "read my file", "read the file", "read the pdf",
         "read my pdf", "read the new file", "read the new pdf",
@@ -209,7 +279,7 @@ WAKE_WORDS = ["lia", "leah", "lea", "liya", "leia", "lya", "lija", "lya"]
 
 # After she answers, keep listening without the name for this long, so you can
 # just talk instead of saying "Lia" before every sentence.
-CONVERSATION_WINDOW_SECONDS = 60
+CONVERSATION_WINDOW_SECONDS = 30
 
 # Same thing after her startup greeting, but shorter. She greets the room at
 # login whether or not you're there, so a full window invites her to answer the
