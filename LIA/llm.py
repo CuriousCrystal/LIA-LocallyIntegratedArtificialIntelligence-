@@ -77,6 +77,29 @@ def chat(messages: list[dict], json_mode: bool = False) -> str:
     return resp.json()["message"]["content"]
 
 
+def chat_tools(messages: list[dict], tools: list[dict], timeout: float = 30) -> list[dict]:
+    """Let the model pick from a set of actions. Returns its tool_calls, which
+    is empty when it didn't choose one.
+
+    Shorter timeout than chat(): this sits between you speaking and anything
+    happening, so waiting two minutes on it would be worse than not asking.
+    """
+    resp = requests.post(
+        f"{OLLAMA_URL}/api/chat",
+        json={
+            "model": MODEL_CHAT,
+            "messages": messages,
+            "tools": tools,
+            "stream": False,
+            "keep_alive": OLLAMA_KEEP_ALIVE,
+            "options": OPTIONS,
+        },
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    return resp.json().get("message", {}).get("tool_calls") or []
+
+
 def chat_stream(messages: list[dict]):
     """Same as chat(), but yields token chunks as they arrive.
 

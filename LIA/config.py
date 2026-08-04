@@ -234,30 +234,6 @@ SPEAKER_MATCH_THRESHOLD = 0.75
 # not a replacement, so the profile gets more representative over time.
 SPEAKER_ENROLL_TARGET = 3
 
-# --- access gate ---
-# A harder line than voice matching alone: at the start of every session, if
-# you don't say "it's {name}" she asks for a passcode before acting on
-# anything. Get it right and she proceeds; get it wrong and she stops
-# listening outright, rather than a soft decline.
-#
-# Read from the environment, never hardcoded here -- the same reasoning as
-# GROQ_API_KEY: this file may end up in a public repo, and a passcode anyone
-# can read in the source isn't a passcode. Set it with:
-#   [Environment]::SetEnvironmentVariable('LIA_PASSCODE', 'your-word', 'User')
-# Left unset, the access gate quietly doesn't engage (see check_access_gate in
-# main.py) rather than locking you out with something that can never match.
-PASSCODE_UNLOCK = os.environ.get("LIA_PASSCODE", "")
-
-# Says this any time (no need to unlock first) and she reads out the tools
-# reference PDF instead of proceeding with anything else that turn.
-#
-# The PDF lives at ../docs/ in source, which doesn't exist next to the
-# packaged exe -- so a copy is kept in LIA/docs/ (bundled alongside voices/
-# and models/ by build_exe.ps1) and read from there instead. Keep that copy
-# in sync if "Lia - Tools We Used.pdf" is ever regenerated.
-PASSCODE_EXPLAIN = "DECODE"
-DECODE_DOCUMENT_PATH = BASE_DIR / "docs" / "Lia - Tools We Used.pdf"
-
 # --- library ---
 # A folder you can hand her a document through. Put a PDF in here and ask her to
 # read it -- she never crawls your drive, and never reads anything you haven't
@@ -276,6 +252,13 @@ LIBRARY_TOP_K = 3
 # Roughly a paragraph or two. Big enough to carry an idea, small enough that
 # three of them don't crowd out everything else.
 CHUNK_CHARS = 900
+
+# How long one embedding call takes, used only to tell you how long indexing a
+# document will take before she starts. Measured on a 4GB card at 2.3s per
+# 900-character passage -- roughly 130 pages per ten minutes. Notably it isn't
+# VRAM-bound: freeing 3.5GB by unloading the chat model changed it by 0.02s.
+# Re-measure and change this if you move to different hardware.
+EMBED_SECONDS_PER_PASSAGE = 2.3
 CHUNK_OVERLAP = 150
 
 # Passages below this similarity are ignored -- better she says she doesn't know
@@ -347,13 +330,29 @@ SPOKEN_COMMANDS = {
     "/volume up": [
         "volume up", "turn it up", "turn the volume up", "louder", "make it louder",
         "can you turn it up",
+        # "increase the volume" was missing entirely, so the most literal way
+        # to ask fell through to the model, which cheerfully said it had done
+        # it. Found in a real session log, asked three different ways, all
+        # of which did nothing.
+        "increase the volume", "raise the volume", "up the volume",
+        "increase volume", "turn up the volume", "bump the volume",
     ],
     "/volume down": [
         "volume down", "turn it down", "turn the volume down", "quieter", "make it quieter",
         "can you turn it down", "lower the volume",
+        "decrease the volume", "decrease volume", "reduce the volume",
+        "turn down the volume", "drop the volume",
     ],
     "/volume mute": ["mute", "mute it", "mute the volume", "can you mute that"],
     "/volume unmute": ["unmute", "unmute it", "unmute the volume"],
+    # Asking what the volume *is*, as opposed to changing it. Without this she
+    # had no way to answer and invented a number ("the volume is at 15") that
+    # had nothing to do with the actual system volume.
+    "/volume": [
+        "what is the volume", "whats the volume", "what's the volume",
+        "how loud is it", "current volume", "check the volume",
+        "what is the volume right now", "how loud is the volume",
+    ],
     "/library scan": [
         "read my files", "read my file", "read the file", "read the pdf",
         "read my pdf", "read the new file", "read the new pdf",

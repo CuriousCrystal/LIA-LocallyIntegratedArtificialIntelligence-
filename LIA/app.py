@@ -179,7 +179,18 @@ class LiaApp:
 def cli():
     parser = argparse.ArgumentParser(description="Run Lia in the system tray.")
     parser.add_argument("--debug", action="store_true", help="keep the console and log live")
+    parser.add_argument("--no-save", action="store_true",
+                        help="don't record anything: no memories, facts or diary. "
+                             "Alarms are still set, since they're an action you asked "
+                             "for rather than history she wrote about you.")
     args = parser.parse_args()
+
+    # Set on the module rather than passed down, because main() reads it in
+    # several places. Without this the flag existed but did nothing in the
+    # packaged app, since the exe starts here and never runs main.py's own
+    # __main__ block -- so testing the .exe still wrote invented history.
+    if args.no_save:
+        lia.NO_SAVE = True
 
     console = sys.stdout if args.debug else None
     log = TeeLog(LOG_PATH, also=console)
@@ -187,6 +198,8 @@ def cli():
     sys.stderr = log
 
     print(f"\n=== Lia starting (idle rollover after {IDLE_MINUTES} min) ===")
+    if args.no_save:
+        print("[--no-save: nothing this session will be remembered]")
     LiaApp(debug=args.debug).run()
     print("=== Lia stopped ===")
 

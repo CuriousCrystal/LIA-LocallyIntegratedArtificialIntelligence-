@@ -5,6 +5,7 @@ numpy>=1.26
 pypdf>=4.0             # PDF text extraction
 ebooklib>=0.18         # .epub text extraction
 beautifulsoup4>=4.12   # strips the HTML inside epub chapters down to plain text
+python-docx>=1.1       # .docx text extraction (Word). Imported as "docx".
 
 # --- voice: speaking ---
 piper-tts>=1.6        # local neural TTS, uses the voice files in voices/

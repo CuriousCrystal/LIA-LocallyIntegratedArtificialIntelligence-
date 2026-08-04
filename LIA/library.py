@@ -34,9 +34,10 @@ from config import (
     CHUNK_CHARS,
     CHUNK_OVERLAP,
     LIBRARY_MIN_SCORE,
+    EMBED_SECONDS_PER_PASSAGE,
 )
 
-SUPPORTED = {".pdf", ".epub", ".txt", ".md", ".markdown"}
+SUPPORTED = {".pdf", ".epub", ".docx", ".txt", ".md", ".markdown"}
 
 
 # ------------------------------------------------------------- extraction ---
@@ -111,6 +112,31 @@ def _read_epub(path: Path) -> list[tuple[int, str]]:
     return chapters
 
 
+def _read_docx(path: Path) -> list[tuple[int, str]]:
+    """A .docx has no fixed pages -- where a page breaks depends on the printer,
+    the font, the margins. So there's no honest page number to cite, and it's
+    returned as one block (page 0) the way a plain text file is. Headings are
+    kept as their own paragraphs so chunking still splits on real boundaries.
+
+    Only .docx, not the older .doc: that's a completely different, binary format
+    that python-docx cannot read at all.
+    """
+    import docx
+
+    document = docx.Document(str(path))
+    parts = [p.text for p in document.paragraphs if p.text.strip()]
+
+    # Tables hold real content in a lot of documents, and dropping them silently
+    # is how a document reads as half-empty for no visible reason.
+    for table in document.tables:
+        for row in table.rows:
+            cells = [c.text.strip() for c in row.cells if c.text.strip()]
+            if cells:
+                parts.append(" | ".join(cells))
+
+    return [(0, "\n\n".join(parts))]
+
+
 def _read_text(path: Path) -> list[tuple[int, str]]:
     return [(0, path.read_text(encoding="utf-8", errors="replace"))]
 
@@ -121,6 +147,8 @@ def extract(path: Path) -> list[tuple[int, str]]:
         return _read_pdf(path)
     if suffix == ".epub":
         return _read_epub(path)
+    if suffix == ".docx":
+        return _read_docx(path)
     return _read_text(path)
 
 
@@ -201,6 +229,45 @@ def pending() -> list[Path]:
         if known.get(_key(path)) != path.stat().st_mtime:
             out.append(path)
     return out
+
+
+def count_passages(paths: list[Path]) -> int:
+    """How many passages these files will come to, without embedding any of them.
+
+    Extracting and chunking is cheap -- measured at 0.18s for a whole novel,
+    against ~23 minutes to actually index it -- so this can be run up front to
+    tell someone how long they're in for, instead of leaving them watching a
+    silent progress counter.
+    """
+    total = 0
+    for path in paths:
+        try:
+            for _, text in extract(path):
+                total += len(chunk(text))
+        except Exception:
+            # A file she can't parse shouldn't stop her quoting a number for the
+            # rest; ingest_file will surface the real problem soon enough.
+            continue
+    return total
+
+
+def estimate_seconds(paths: list[Path]) -> float:
+    """Roughly how long indexing these will take, in seconds."""
+    return count_passages(paths) * EMBED_SECONDS_PER_PASSAGE
+
+
+def describe_wait(seconds: float) -> str:
+    """A human phrase for a duration -- "about twenty minutes", not "1380s"."""
+    if seconds < 45:
+        return "a moment"
+    minutes = round(seconds / 60)
+    if minutes <= 1:
+        return "about a minute"
+    if minutes < 10:
+        return f"about {minutes} minutes"
+    # Past ten minutes the exact figure is false precision -- the rate varies
+    # with what else is running -- so round to something a person would say.
+    return f"around {int(round(minutes / 5.0) * 5)} minutes"
 
 
 def ingest_file(path: Path, on_progress=None) -> int:

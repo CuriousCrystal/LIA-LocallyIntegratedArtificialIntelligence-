@@ -37,6 +37,7 @@ import requests
 import alarms
 import db
 import diary
+import intent
 import internet
 import library
 import llm
@@ -71,9 +72,6 @@ from config import (
     MEDIA_TRIGGER_PHRASES,
     VOLUME_STEP,
     SPEAKER_ENROLL_TARGET,
-    PASSCODE_UNLOCK,
-    PASSCODE_EXPLAIN,
-    DECODE_DOCUMENT_PATH,
 )
 
 HELP = """
@@ -95,6 +93,11 @@ HELP = """
 # printing over it from its own thread.
 PROMPT_HINT = "You: "
 
+# Set by --no-save. When on, nothing from the session reaches the database: no
+# stored turns, no fact extraction, no diary. For testing her without leaving
+# invented history behind.
+NO_SAVE = False
+
 
 def status(text: str):
     """Transient one-line indicator, overwritten in place."""
@@ -108,6 +111,22 @@ def clear_status():
 def build_system_message(state: dict | None = None) -> dict:
     facts = db.get_all_facts()
     content = SYSTEM_PROMPT
+
+    # A language model has no clock and no way to read the system volume, so
+    # asked either question it invents an answer -- observed live, confidently
+    # reporting a time an hour off and a volume of "15" that matched nothing.
+    # Handing it the real values costs nothing and fixes every phrasing at
+    # once, rather than needing a matching phrase for each way of asking.
+    now = dt.datetime.now()
+    facts_now = [f"The current time is {now.strftime('%I:%M %p').lstrip('0')} "
+                 f"on {now.strftime('%A, %d %B %Y')}."]
+    level = media.get_volume() if media.volume_available() else None
+    if level is not None:
+        facts_now.append(f"The system volume is currently at {level} percent.")
+    content += (
+        "\n\nTrue right now, checked at this moment -- use these exact values if asked, "
+        "and never guess at them:\n- " + "\n- ".join(facts_now)
+    )
 
     # False (not None) means a voice sample was actually compared and didn't
     # match -- only that specific, confirmed case withholds anything. None
@@ -462,8 +481,16 @@ def handle_command(cmd: str, speaker: voice.Speaker, state: dict) -> bool:
             print("[unmuted]\n" if outcome else "[couldn't unmute]\n")
             speaker.say("Unmuted." if outcome else "I couldn't unmute that.")
         else:
+            # Asked out loud ("what's the volume?"), so it has to answer out
+            # loud too. Printing only meant she said nothing at all and the
+            # model filled the silence with an invented number.
             level = media.get_volume()
-            print(f"[volume: {level}%]\n" if level is not None else "[couldn't read the volume]\n")
+            if level is not None:
+                print(f"[volume: {level}%]\n")
+                speaker.say(f"It's at {level} percent.")
+            else:
+                print("[couldn't read the volume]\n")
+                speaker.say("I couldn't read the volume just now.")
 
     elif name == "/library":
         # A voice-triggered scan ("Lia, read my files") used to only print its
@@ -471,16 +498,47 @@ def handle_command(cmd: str, speaker: voice.Speaker, state: dict) -> bool:
         # said it out loud. Every other spoken command speaks its result; this
         # one didn't, so it looked like she ignored the request entirely.
         scanned = arg in ("scan", "refresh", "reload", "read")
-        chunks = 0
         if scanned:
-            try:
-                files_done, chunks = sync_library()
-            except requests.RequestException:
-                print("[couldn't reach Ollama -- try again in a moment]\n")
-                speaker.say("I couldn't reach Ollama to read those just now -- try again in a moment.")
-                return True
-            if not chunks:
+            waiting = library.pending()
+            if not waiting:
                 print("[nothing new to read]\n")
+                speaker.say("There's nothing new to read -- I've already read everything in there.")
+            else:
+                # Indexed on a background thread, never inline. A full novel is
+                # ~590 embedding calls at roughly a second each: run here, it
+                # held the whole conversation loop for twenty minutes and she
+                # simply stopped answering, which is exactly how it looked from
+                # the outside -- she'd frozen. Startup already backgrounded this
+                # (start_library_sync); the on-demand path was the one that
+                # didn't, so the freeze only ever showed up when you *asked*.
+                names = ", ".join(p.stem[:40] for p in waiting[:2])
+                more = f" and {len(waiting) - 2} more" if len(waiting) > 2 else ""
+                # Counting first costs a fraction of a second and turns "this
+                # takes a while" into an actual number, so you can decide
+                # whether to wait rather than watching a silent counter.
+                wait = library.describe_wait(library.estimate_seconds(waiting))
+                print(f"[reading {names}{more} in the background -- {wait}]\n")
+                if wait == "a moment":
+                    speaker.say("On it.")
+                else:
+                    speaker.say(
+                        f"On it -- that'll take {wait}. I'll keep talking meanwhile and tell "
+                        f"you when I'm done."
+                    )
+
+                def read_in_background():
+                    try:
+                        files_done, chunks = sync_library(announce=False, quiet=True)
+                    except requests.RequestException:
+                        print("\n[couldn't reach Ollama -- try /library scan again later]\n")
+                        return
+                    if chunks:
+                        print(f"\n[finished reading {files_done} file(s), {chunks} passages]\n")
+                        speaker.say(
+                            f"Finished reading -- {chunks} passages. Ask me about it whenever."
+                        )
+
+                threading.Thread(target=read_in_background, daemon=True).start()
 
         shelf = library.titles()
         if shelf:
@@ -488,16 +546,8 @@ def handle_command(cmd: str, speaker: voice.Speaker, state: dict) -> bool:
             for title, count in shelf:
                 print(f"  - {title} ({count} passages)")
             print(f"  drop more files in {LIBRARY_DIR}, then /library scan\n")
-            if scanned:
-                if chunks:
-                    speaker.say(f"Done -- I read {files_done} file{'s' if files_done != 1 else ''}, "
-                                f"{chunks} passages.")
-                else:
-                    speaker.say("There wasn't anything new to read.")
-        else:
+        elif not scanned:
             print(f"[library is empty -- put PDFs in {LIBRARY_DIR}, then /library scan]\n")
-            if scanned:
-                speaker.say("My library's empty right now -- drop some files in and ask me again.")
 
     elif name == "/voices":
         found = voice.available_voices()
@@ -651,78 +701,6 @@ def wait_for_her(speaker: voice.Speaker, listener, state: dict) -> str | None:
     return None
 
 
-def _passcode_match(text: str, passcode: str) -> bool:
-    """A passcode has to be said cleanly -- strip punctuation/case, but don't
-    fuzzy-match it, or "on code" could slide through as "encode.\""""
-    cleaned = re.sub(r"[^a-z]", "", text.lower())
-    return cleaned == passcode.lower()
-
-
-def is_unlock_passcode(text: str) -> bool:
-    return _passcode_match(text, PASSCODE_UNLOCK)
-
-
-def is_explain_passcode(text: str) -> bool:
-    return _passcode_match(text, PASSCODE_EXPLAIN)
-
-
-def explain_document(path, speaker: voice.Speaker, controls: "Controls | None" = None):
-    """Read a document's full text and have her explain it in her own words --
-    a one-off, isolated call, not routed through the normal library search
-    (that's built for a targeted question, not "explain the whole thing")."""
-    path = Path(path)
-    if not path.exists():
-        message = "I'm supposed to have a copy of that document, but I can't find it right now."
-        print(f"LIA: {message}\n")
-        speaker.say(message)
-        return
-
-    pages = library.extract(path)
-    text = "\n\n".join(t for _, t in pages)
-    if not text.strip():
-        message = "I have the file, but I can't actually read any text out of it."
-        print(f"LIA: {message}\n")
-        speaker.say(message)
-        return
-
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are Lia. Explain the document below in your own words, as if walking a "
-                "friend through it out loud -- warm, conversational, not a dry summary. Cover the "
-                "main sections and what each tool is for. Keep it to a reasonable length for "
-                "spoken conversation, not an exhaustive recitation."
-            ),
-        },
-        {"role": "user", "content": text},
-    ]
-
-    status("reading it over")
-    pieces = []
-    sentences = voice.SentenceBuffer()
-    try:
-        for piece in llm.chat_stream(messages):
-            if controls is not None and controls.quit.is_set():
-                break
-            if not pieces:
-                clear_status()
-                print("LIA: ", end="", flush=True)
-            print(piece, end="", flush=True)
-            pieces.append(piece)
-            for sentence in sentences.feed(piece):
-                speaker.say(sentence)
-    except (KeyboardInterrupt, requests.RequestException) as exc:
-        clear_status()
-        print(f"\n  [couldn't finish explaining it: {exc}]\n")
-        speaker.drop_pending()
-        return
-
-    clear_status()
-    speaker.say(sentences.flush())
-    print("\n")
-
-
 def claims_identity(text: str) -> bool:
     """Does this sound like them confirming who they are -- "it's Wade"?
 
@@ -735,60 +713,6 @@ def claims_identity(text: str) -> bool:
         return False
     pattern = re.compile(rf"\b(?:it'?s|this is|it is)\s+{re.escape(name)}\b", re.IGNORECASE)
     return bool(pattern.search(text))
-
-
-def check_access_gate(user_input: str, state: dict, speaker: voice.Speaker) -> bool:
-    """Gate the start of a session behind either the identity phrase or a
-    passcode. Returns True if this turn was consumed by the gate (the caller
-    should move on to the next turn), False if the turn should proceed as
-    normal conversation.
-
-    Deliberately stricter than the per-action voice-match gating elsewhere:
-    getting the passcode wrong doesn't just decline one thing, it stops her
-    listening outright, since this is the one check standing before anything
-    happens at all.
-    """
-    if state.get("authenticated"):
-        return False
-
-    if not PASSCODE_UNLOCK:
-        # No LIA_PASSCODE set -- treat the gate as switched off rather than
-        # locking you out with a passcode that can never be typed correctly.
-        # Printed once per session, not every turn, so it's noticeable without
-        # being noisy.
-        if not state.get("_warned_no_passcode"):
-            print("[access gate: no LIA_PASSCODE set, so this session isn't locked -- "
-                  "see config.py]\n")
-            state["_warned_no_passcode"] = True
-        state["authenticated"] = True
-        return False
-
-    if claims_identity(user_input):
-        state["authenticated"] = True
-        return False  # let the rest of this utterance, if any, proceed normally
-
-    if state.get("awaiting_passcode"):
-        state["awaiting_passcode"] = False
-        if is_unlock_passcode(user_input):
-            state["authenticated"] = True
-            message = "Thanks -- go ahead."
-            print(f"LIA: {message}\n")
-            speaker.say(message)
-        else:
-            state["listening"] = False
-            message = "That's not right, so I'll stop listening for now."
-            print(f"LIA: {message}")
-            # Voice genuinely can't reach her once listening is off -- saying
-            # so would be misleading. Recovery has to be manual on purpose.
-            print("[listening off -- type \"/mic on\", or use the tray menu]\n")
-            speaker.say(message)
-        return True
-
-    state["awaiting_passcode"] = True
-    message = "I don't recognise that voice. What's the passcode?"
-    print(f"LIA: {message}\n")
-    speaker.say(message)
-    return True
 
 
 def process_voice_sample(text: str, audio, state: dict):
@@ -811,12 +735,6 @@ def process_voice_sample(text: str, audio, state: dict):
             if progress <= SPEAKER_ENROLL_TARGET:
                 print(f"[voice: learning your voice -- {progress}/{SPEAKER_ENROLL_TARGET}]")
         state["voice_match"] = True  # they just told her who they are -- trust this turn
-        # Set here, on the raw utterance, not left to check_access_gate: if
-        # this same breath also contains an action ("it's Wade, play some
-        # music"), as_instruction() rewrites the text to "/media play" further
-        # down the pipeline, and the identity phrase would be gone by the time
-        # anything downstream tried to read it back out of the text.
-        state["authenticated"] = True
         return
 
     if speaker_id.is_enrolled():
@@ -848,8 +766,33 @@ def accept_spoken(spoken: str, state: dict) -> str | None:
 
 
 def as_instruction(text: str) -> str:
-    """Turn a spoken instruction into its command form, if it is one."""
-    return spoken_command(text) or text
+    """Turn a spoken instruction into its command form, if it is one.
+
+    Two layers, in this order for a reason: the phrase matcher is instant and
+    deterministic, so it handles the everyday wordings; only what it doesn't
+    recognise is worth spending a model round-trip on. See intent.py.
+    """
+    if text.startswith("/"):
+        return text
+
+    # Alarms get first refusal, because they're the most specific thing here:
+    # scheduling one needs an explicit keyword AND a parseable time, where a
+    # spoken command needs only a phrase. Without this, "wake me by saying
+    # please wake up in 5 minutes" matched the "wake up" phrasing of /mic on
+    # -- since phrases match anywhere in a sentence now -- and toggled the
+    # microphone instead of setting the alarm. Bare "wake up" still reaches
+    # /mic on below, because with no time in it there's no alarm to schedule.
+    if alarms.would_schedule(text):
+        return text
+
+    matched = spoken_command(text)
+    if matched:
+        return matched
+    guessed = intent.route(text)
+    if guessed:
+        print(f"  [took that as: {guessed}]")
+        return guessed
+    return text
 
 
 def prewarm():
@@ -909,11 +852,6 @@ def read_input(
 
         if typed:
             state["voice_match"] = None  # typed on your own keyboard -- no voice signal either way
-            if claims_identity(typed):
-                # Checked here, on the raw text, before as_instruction() gets
-                # a chance to rewrite something like "it's Wade, play music"
-                # down to just "/media play" and lose the identity phrase.
-                state["authenticated"] = True
             return as_instruction(typed)
         if not state["listening"] or listener is None:
             return typed
@@ -937,8 +875,6 @@ def read_input(
         typed = keys.take()
         if typed is not None:
             state["voice_match"] = None
-            if typed and claims_identity(typed):
-                state["authenticated"] = True
             return as_instruction(typed) if typed else typed
         if spoken:
             process_voice_sample(spoken, listener.last_audio, state)
@@ -1026,10 +962,6 @@ def start_idle_watchdog(session: Session, stop: threading.Event, state: dict) ->
             if session.idle_seconds() >= idle_limit:
                 print(f"\n\n[quiet for {IDLE_MINUTES} minutes -- closing out the conversation]")
                 close_out(session)
-                # A new session starts locked again, same as a fresh process --
-                # "at the start of every convo" means every one, not just the first.
-                state["authenticated"] = False
-                state["awaiting_passcode"] = False
                 print("\n[still here whenever you are]")
                 print(PROMPT_HINT, end="", flush=True)
 
@@ -1046,8 +978,10 @@ def start_alarm_watchdog(speaker: voice.Speaker, stop: threading.Event) -> threa
     """
     def loop():
         while not stop.wait(10):
-            for label in alarms.check_due():
-                message = f"{label.capitalize()} is up."
+            # Spoken exactly as stored: alarms.py already decided the words,
+            # because "please wake up" and "your 5 minute timer is up" don't
+            # fit one template, and asking for specific words should get them.
+            for message in alarms.check_due():
                 print(f"\n[{message}]")
                 speaker.say(message)
 
@@ -1058,6 +992,9 @@ def start_alarm_watchdog(speaker: voice.Speaker, stop: threading.Event) -> threa
 
 def end_session(session_id: str, short_term: list[dict]):
     if not short_term:
+        return
+    if NO_SAVE:
+        print("\n[--no-save: skipping diary and fact extraction]\n")
         return
     transcript = format_transcript(short_term)
 
@@ -1112,10 +1049,6 @@ def main(controls: "Controls | None" = None):
         "open_mic": True if headless else OPEN_MIC,
         "wake_word": WAKE_WORD_ENABLED,
         "window_until": 0.0,
-        # Every new session starts locked -- reset on rollover in
-        # start_idle_watchdog too, not just here at process start.
-        "authenticated": False,
-        "awaiting_passcode": False,
     }
     keys = None if headless else Keyboard()
 
@@ -1210,12 +1143,9 @@ def main(controls: "Controls | None" = None):
         if not user_input:
             continue
 
-        # Ending the session always has to work, authenticated or not -- an
-        # access gate that traps you in the conversation instead of letting
-        # you leave is a much worse bug than anything it's supposed to guard
-        # against. (Found the hard way: with this check later, once
-        # unauthenticated, "bye" got treated as a passcode guess instead of
-        # exiting, and piped/EOF input spun forever re-triggering it.)
+        # Ending the session always has to work, whatever else is going on --
+        # anything that traps you in the conversation instead of letting you
+        # leave is a much worse bug than whatever it was guarding against.
         if user_input.lower() in {"bye", "exit", "quit"}:
             stop_watchdog.set()
             close_out(session)
@@ -1223,20 +1153,6 @@ def main(controls: "Controls | None" = None):
             speaker.say("Take care. I'll be here.")
             speaker.wait()
             break
-
-        # Available any time, unlocked or not -- knowing the word is itself
-        # the point, same as the passcode below.
-        if is_explain_passcode(user_input):
-            explain_document(DECODE_DOCUMENT_PATH, speaker, controls)
-            continue
-
-        # Checked before commands, not after: "play some music" gets rewritten
-        # to "/media play" by as_instruction() upstream, so if the gate ran
-        # after handle_command, every gated action would reach it pre-converted
-        # into a slash command and slip straight through untouched -- found
-        # exactly this happening in testing.
-        if check_access_gate(user_input, state, speaker):
-            continue
 
         if handle_command(user_input, speaker, state):
             if state["listening"] and listener is None:
@@ -1329,10 +1245,11 @@ def main(controls: "Controls | None" = None):
         session.add("user", user_input)
         session.add("assistant", reply)
 
-        status("saving")
-        memory.remember_turn(session.id, "user", user_input)
-        memory.remember_turn(session.id, "assistant", reply)
-        clear_status()
+        if not NO_SAVE:
+            status("saving")
+            memory.remember_turn(session.id, "user", user_input)
+            memory.remember_turn(session.id, "assistant", reply)
+            clear_status()
 
         # Let her finish -- or let you talk over her. Without barge-in this just
         # blocks until playback ends, so she never hears her own tail.
@@ -1347,4 +1264,13 @@ def main(controls: "Controls | None" = None):
 
 
 if __name__ == "__main__":
+    # --no-save exists because testing her wrote into her real memory. A dozen
+    # piped "hello"s became stored turns, and each run ended with her writing a
+    # diary entry reflecting on a conversation that never happened -- one of
+    # which mused on the person "moving between unrelated topics", which was
+    # only ever a list of test commands. Reflections should come from being
+    # talked to, not from being checked.
+    if "--no-save" in sys.argv:
+        NO_SAVE = True
+        print("[--no-save: nothing this session will be remembered]\n")
     main()

@@ -93,6 +93,12 @@ A(H2("Alarms and timers"))
 A(P("She sets these from plain speech — a clock time (“set an alarm for 7am”) or a "
     "duration (“remind me in 20 minutes”). They keep running even if you close the laptop and "
     "come back later, and she'll interrupt whatever's happening to tell you when one is due."))
+A(P("<b>Say it however comes naturally.</b> All of these work: <i>“wake me in half an hour”</i>, "
+    "<i>“give me a nudge in 20 minutes”</i>, <i>“let me know in ten minutes”</i>, <i>“remind me "
+    "in a couple of minutes”</i>, <i>“buzz me in an hour”</i>, <i>“set a timer for 5”</i>."))
+A(P("<b>You can choose what she says.</b> <i>“Wake me by saying please wake up in 5 minutes”</i> "
+    "and she'll say exactly that — not “your timer is up”. <i>“Remind me to stretch in 20 "
+    "minutes”</i> gets you <i>“Time to stretch.”</i>"))
 A(P("Music is different: she can only control something already playing somewhere (Spotify, a "
     "browser tab). She can't start a song from nothing — if nothing is playing anywhere, she'll "
     "say so rather than pretend.", "LiaNote"))
@@ -155,12 +161,14 @@ A(PageBreak())
 A(H1("Giving her something to read"))
 
 A(P("There is a folder on this computer where you can put documents you'd like her to read — "
-    "PDFs, epub books, or plain text notes."))
+    "PDFs, epub books, Word documents, or plain text notes."))
 
 A(code("dist\\Lia\\library\\"))
 
-A(P("Put a file there, then say <b>“Lia, read my files”</b>. She'll take a few minutes for a long "
-    "document, then you can ask her about it and she'll tell you which page something came from."))
+A(P("Put a file there, then say <b>“Lia, read my files”</b>. She'll tell you what she's in for — "
+    "<i>“On it”</i> for something short, or <i>“On it, that'll take around 25 minutes”</i> for a "
+    "whole book — and say so again when she's finished. Afterwards you can ask her about it and "
+    "she'll tell you which page something came from."))
 
 A(callout("<b>She only ever looks in that one folder, and only when you ask.</b> She does not search "
           "your computer, open your documents, or read anything you haven't deliberately given her. "
@@ -173,9 +181,10 @@ A(bullets([
     "entire document at once",
     "<b>Won't work:</b> scanned documents or photographs of pages. If you can't select the text on "
     "screen with your mouse, there's nothing for her to read",
-    "<b>A whole novel is a real wait:</b> a full-length book runs to several hundred passages — "
-    "expect roughly 20 minutes the first time you add one. It happens in the background, so she "
-    "stays usable meanwhile, but that book isn't answerable about until it finishes.",
+    "<b>A whole novel is a real wait:</b> she reads about 130 pages every ten minutes, so a "
+    "full-length book takes roughly 20 minutes the first time you add one. It happens in the "
+    "background and she stays usable meanwhile, but that book isn't answerable about until she "
+    "finishes — and she'll say so out loud when she's done.",
 ]))
 
 # ------------------------------------------------------------- honesty ---

@@ -93,7 +93,10 @@ A(bullets([
     "the audio API directly instead of imitating a keypress.)",
     "<b>Alarms and timers</b> — genuine ones, checked by a background watchdog every ten seconds "
     "and persisted across restarts, so “remind me in twenty minutes” survives even if the "
-    "conversation, or the app itself, closes in the meantime.",
+    "conversation, or the app itself, closes in the meantime. Later widened to how people "
+    "actually speak — spoken numbers, “half an hour”, “a couple of minutes”, “give me a nudge”, "
+    "“buzz me” — and taught to say <i>the words you asked for</i>: “wake me by saying please wake "
+    "up” wakes you with those words, not with “your timer is up”.",
 ]))
 
 A(H2("What she knows about herself"))
@@ -115,11 +118,18 @@ A(P("Two separate systems, both narrow and optional by design. <b>Internet acces
     "phrase match. YouTube got the same trigger word shortly after, for the same reason — with the "
     "same honest limit either way: it's still a text search that happens to mention the site, not "
     "anything that can watch or listen to what's actually there."))
-A(P("<b>The library</b> now reads <font face='Courier'>.epub</font> files as well as PDF, text, and "
-    "markdown — added after a real book (a Harry Potter novel) got dropped in and turned out not to "
-    "work yet. A full novel is a genuine time cost to index (roughly 20 minutes of embedding calls "
-    "for one book), and even once indexed she retrieves passages, not the whole text — she can "
-    "discuss a specific scene or character, not narrate the book start to finish.", "LiaNote"))
+A(P("<b>The library</b> now reads <font face='Courier'>.epub</font> and "
+    "<font face='Courier'>.docx</font> as well as PDF, text and markdown — epub added after a real "
+    "book (a Harry Potter novel) got dropped in and turned out not to work yet. Even once indexed "
+    "she retrieves passages, not the whole text: she can discuss a specific scene or character, "
+    "not narrate a book start to finish.", "LiaNote"))
+A(P("Indexing speed was finally <i>measured</i> rather than estimated, and the figure in the docs "
+    "turned out to be wrong by about four and a half times — 2.3 seconds per passage, not the "
+    "half-second long claimed, or roughly 130 pages per ten minutes. Notably it isn't starved of "
+    "VRAM: freeing 3.5GB by unloading the chat model moved the rate by 0.02s, so there's no easy "
+    "speed-up to chase. Since counting the passages up front costs only a fraction of a second, "
+    "she now says what she's in for before starting — <i>“On it”</i>, or <i>“On it, that'll take "
+    "around 25 minutes”</i> — instead of going quiet.", "LiaNote"))
 
 A(H2("Knowing who's asking: voice recognition"))
 A(P("If actions are the risk this stage introduced, this is the safeguard for it. Say "
@@ -135,28 +145,41 @@ A(callout("<b>Honestly unverified:</b> real-world accuracy could only be tested 
           "and <font face='Courier'>/whoami</font> exists specifically so it can be tuned against "
           "real use."))
 
-A(H2("A harder gate: a spoken passcode"))
-A(P("Voice recognition alone is a soft signal — useful, but not something to bet real access on "
-    "given a laptop mic's reliability. So every session now opens locked: say the identity phrase "
-    "within the first exchange, or she asks for a spoken passcode instead of acting on anything. "
-    "Get it right and the session opens for good; get it wrong and she stops listening outright, "
-    "recoverable only by hand (the tray menu, or typing it back on) — deliberately not "
-    "recoverable by voice, since that would make the lock trivial to talk past."))
-A(P("A second, separate passcode does something rather than unlocking anything: said at any time, "
-    "unlocked or not, it has her read out and explain a specific reference document in her own "
-    "words. Knowing the word is the point, the same as the first passcode.", "LiaNote"))
-A(callout("<b>Two real bugs, found only by running it, not by reading the code:</b> the gate was "
-          "checked before the “end the session” check, so once locked, saying goodbye "
-          "got treated as a passcode guess instead of exiting — which combined with a second, "
-          "unrelated bug (the keyboard reader spinning with no backoff once input ran out) into a "
-          "genuine infinite loop, over 600,000 identical lines in under a minute. Separately, "
-          "saying the identity phrase and a request in the same breath (“it's Wade, play some "
-          "music”) silently dropped the identity phrase, because the request got rewritten into a "
-          "command before the gate ever saw the original words. Both fixed and reverified live."))
-A(P("The unlock passcode itself moved to an environment variable shortly after, the same reasoning "
-    "as the API keys — a plaintext passcode in a file that might end up in a public repo isn't "
-    "one. Left unset, the gate now disables itself with a one-time log line rather than locking "
-    "anyone out with a word that could never be typed correctly.", "LiaNote"))
+A(H2("A harder gate: built, lived with, removed"))
+A(P("For a stretch this stage also had a spoken passcode in front of it: every session opened "
+    "locked, and without the identity phrase she asked for a word before acting on anything — "
+    "wrong word and she stopped listening outright. It worked, and two genuine bugs got found and "
+    "fixed inside it (saying “goodbye” while locked was read as a wrong guess instead of an exit; "
+    "an identity phrase said in the same breath as a request was silently dropped). The passcode "
+    "was later moved out of the source file into an environment variable, on the same reasoning "
+    "as the API keys."))
+A(callout("<b>Then it was removed, on the strength of actually living with it.</b> A lock that "
+          "opens every conversation is a real cost paid on every single exchange, against a threat "
+          "that doesn't exist on a personal laptop that's already password-protected. It made a "
+          "companion feel like a checkpoint. Voice recognition stays as the soft signal it always "
+          "was; the hard gate is gone. Worth recording as a stage that was built properly, "
+          "evaluated honestly, and then undone — not everything that works is worth keeping."))
+
+A(H2("Understanding, not just matching"))
+A(P("Every action above was reached through a list of remembered phrasings, and that list was "
+    "always going to be incomplete — people don't say “volume up”, they say “could you push that "
+    "up a bit, it's hard to hear.” Anything unlisted fell through to ordinary conversation, where "
+    "the model, with no idea an action had been wanted, produced a confident “sure, doing that "
+    "now” and did nothing. <b>That failure is worse than refusing outright, because it looks like "
+    "it worked</b> — and it's exactly what a week of real use kept running into."))
+A(P("So a second layer went in behind the first: when no phrase matches, the model is shown the "
+    "actions she can actually take and asked which one, if any, was meant. It decides from "
+    "meaning rather than from remembered wordings. The phrase matcher stays in front of it — "
+    "instant, free and completely predictable for the everyday cases — and the model is only "
+    "consulted when the words could plausibly be about an action at all, so ordinary conversation "
+    "never waits on it."))
+A(callout("<b>Measured, not assumed:</b> 30 of 32 across repeated runs, including every "
+          "“this is just conversation” case. Getting there took two failed attempts worth "
+          "recording — stated as abstract rules, the model turned the volume up on “I couldn't "
+          "hear you properly earlier” five times out of five, and ignored “I've added a book, go "
+          "have a look” five out of five. Concrete examples of the distinction fixed both "
+          "outright, where the rules hadn't. A model this size generalises from cases, not "
+          "principles."))
 
 A(H2("Not yet built"))
 A(bullets([

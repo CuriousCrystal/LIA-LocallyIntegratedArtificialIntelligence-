@@ -97,16 +97,60 @@ Set `BARGE_IN = False` to go back to letting her finish.
 
 Edit `SPOKEN_COMMANDS` in `config.py` to add your own phrasings.
 
+### When your words aren't on the list
+
+That list will always be incomplete — people don't say *"volume up"*, they say
+*"could you push that up a bit, it's hard to hear."* So there are two layers,
+in this order:
+
+1. **The phrase list** — instant, free, completely predictable. Handles the
+   everyday wordings.
+2. **`intent.py`** — when nothing matched, the model is shown the actions she
+   can actually take and asked which one, if any, you meant. It decides from
+   meaning rather than remembered wordings.
+
+The second layer only runs when your words look like they could plausibly be
+about an action at all, so ordinary conversation never waits on it — measured
+at 0.00s for anything conversational, versus roughly 3s when she does stop to
+work out what you meant.
+
+It's a fallback rather than a replacement on purpose: a 3B model is good at
+this but not perfectly consistent, so the deterministic matcher stays in front
+of it. Measured across repeated runs it got **30 of 32** right, including every
+one of the "this is just conversation, don't act on it" cases — the weakest was
+an ambiguous *"I'm done with this song, move on"*, which sometimes paused
+instead of skipping.
+
+Both failure directions are worth knowing about: she can miss an unusual
+request (it falls through to conversation, exactly as it did before this
+existed), or occasionally read a passing remark as a request. Say *"that's not
+what I meant"* and carry on — nothing here does anything you can't immediately
+undo, and when she does act on an interpretation she prints
+`[took that as: …]` so it's never a mystery.
+
 ## Giving her things to read
 
-Drop `.pdf`, `.txt` or `.md` files into `LIA\library\` (or `dist\Lia\library\`
+Drop `.pdf`, `.epub`, `.docx`, `.txt` or `.md` files into `LIA\library\` (or `dist\Lia\library\`
 for the packaged app). She indexes them on startup, or right away with
 `/library scan`. `/library` lists what she's read.
 
 She retrieves *passages*, not whole documents, and cites the file and page. Ask
 about something specific and she'll find it; ask her to summarise a 300-page book
-and she'll only see the few passages that matched. Indexing costs about half a
-second per passage, once per file. Scanned PDFs won't work — there's no OCR.
+and she'll only see the few passages that matched. Scanned PDFs won't work —
+there's no OCR.
+
+Indexing costs one embedding call per passage, **measured at ~2.3s** on a 4GB
+card: roughly 130 pages per ten minutes, so a full novel is about twenty
+minutes. It happens once per file, runs in the background, and she stays usable
+throughout.
+
+Before she starts she counts the passages — a fraction of a second, no
+embedding — and tells you what you're in for: *"On it"* for something short, or
+*"On it, that'll take around 25 minutes"* for a book. She says so again when
+she's finished.
+
+`.docx` is Word's current format only — not the old binary `.doc`, and not
+Kindle's `.mobi`/`.azw`. Converting those to `.epub` or `.docx` first works.
 
 ## Weather, lookups and music
 
@@ -155,6 +199,28 @@ start a track from nothing, and she'll say so honestly rather than guess:
 "what song is this" / "what's playing"
 ```
 
+**Alarms and timers** are parsed by regex, never by the model — a timer has to
+fire at the right second, and precise extraction is exactly what a 3B is worst
+at. Say it however it comes out:
+
+```
+"remind me in 5 min"          "wake me in half an hour"
+"give me a nudge in 20 mins"  "let me know in ten minutes"
+"buzz me in an hour"          "set a timer for 5"
+"wake me up at 7am"           "wake me at half past 3"
+```
+
+Spoken numbers, vague durations ("a couple of minutes") and clock forms
+("half past three") all work. **You can also choose the words she wakes you
+with** — *"wake me by saying please wake up in 5 minutes"* and she says exactly
+that, rather than "your timer is up". *"Remind me to stretch in 20 minutes"*
+becomes *"Time to stretch."*
+
+They survive restarts, and she interrupts whatever's happening to say them.
+Ordinary conversation containing a time ("we talked for an hour yesterday")
+deliberately doesn't schedule anything — that needs an explicit word like
+*remind*, *wake* or *timer* as well.
+
 **Volume** talks to Windows' Core Audio API directly (via `pycaw`), not to a
 simulated key press — that was tried first and verified to silently do
 nothing, since a simulated key needs a focused window to land on:
@@ -168,9 +234,9 @@ nothing, since a simulated key needs a focused window to land on:
 
 Say **"Lia, it's Wade"** a few times and she builds a voiceprint — a local model
 (3D-Speaker's CAM++, via `sherpa-onnx`, no PyTorch) compares later speech against
-it. This alone is a soft comfort signal, not a lock: a clear mismatch means she
+it. This is a soft comfort signal, not a lock: a clear mismatch means she
 won't use your name and won't share what she remembers about you, but she never
-simply refuses to talk. The harder lock is the access gate below.
+simply refuses to talk.
 
 `/whoami` shows enrollment progress and the last confidence score; `/whoami forget`
 clears the profile and starts over. **Real-world accuracy is unverified from
@@ -179,32 +245,6 @@ development** — it was only tested against synthetic TTS voices, which likely
 `speaker_id.py`'s docstring). `SPEAKER_MATCH_THRESHOLD` in `config.py` is a
 starting point, not a calibrated answer — expect to retune it once there's real
 usage data.
-
-## The access gate
-
-Every session starts locked. Say the identity phrase ("Lia, it's Wade") within
-the first exchange, or she asks for a spoken passcode instead of acting on
-anything. Get it right and the session unlocks for good; get it wrong and she
-**stops listening entirely** — recoverable only by hand (the tray menu, or typing
-`/mic on`), deliberately not by voice, or the lock would be trivial to talk past.
-
-The passcode is read from an environment variable, the same pattern as the API
-keys — never hardcoded in `config.py`, since that file may end up in a public
-repo:
-
-```powershell
-[Environment]::SetEnvironmentVariable('LIA_PASSCODE', 'your-word', 'User')
-```
-
-**Left unset, the gate quietly doesn't engage** — every session is treated as
-already unlocked, with a one-time log line saying so, rather than locking you
-out with a passcode that can never be typed correctly.
-
-A second, separate phrase — set in `config.py` as `PASSCODE_EXPLAIN` — works
-independently of the gate, any time, unlocked or not: say it and she reads out
-and explains `LIA/docs/Lia - Tools We Used.pdf` in her own words. It doesn't
-grant access to anything, so it stays a plain constant rather than an
-environment variable.
 
 ## How she remembers
 

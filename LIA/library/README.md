@@ -9,7 +9,10 @@ my files"** (or type `/library scan`). She reads it then, and not before.
 outside it. Nothing is scanned, indexed, or absorbed until you ask. A file
 sitting here is available to her, not already in her head.
 
-**Supported:** `.pdf`, `.epub`, `.txt`, `.md`
+**Supported:** `.pdf`, `.epub`, `.docx`, `.txt`, `.md`
+
+Not `.doc` (the old binary Word format), `.mobi` or `.azw` (Kindle). Converting
+those to `.epub` or `.docx` first makes them readable.
 
 Subfolders are fine — she looks all the way down, but only when asked.
 
@@ -25,9 +28,15 @@ that best matched those words — a 300-page book does not fit in an 8k context.
 
 ## What to expect
 
-- **Indexing is slow.** Every passage costs an embedding call, about half a
-  second. A long PDF can take several minutes the first time. It only happens
-  once per file unless you edit it.
+- **She tells you how long it'll take.** Before starting she counts the
+  passages (a fraction of a second, no embedding) and says either *"On it"* for
+  something short, or *"On it — that'll take around 25 minutes"* for a book.
+- **Indexing is slow.** Every passage costs an embedding call, measured at
+  about **2.3 seconds** on a 4GB card — roughly 260 passages, or 130 pages, in
+  ten minutes. A long PDF takes several minutes the first time, and it only
+  happens once per file unless you edit it. (Closing other things doesn't help:
+  freeing 3.5GB of VRAM changed the rate by 0.02s. That's simply the embedding
+  model's speed here.)
 - **A full novel is a real wait, not a quick one.** A ~300-page book runs to
   several hundred passages — measured at ~590 for a single Harry Potter novel,
   around 20 minutes of embedding calls. It runs in the background, so she stays

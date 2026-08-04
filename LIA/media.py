@@ -48,7 +48,28 @@ def volume_available() -> bool:
     return _VOLUME_AVAILABLE
 
 
+def _note(what: str, exc: Exception):
+    """Say why something failed, instead of failing silently.
+
+    Every function here returns None/False on error by design, so the caller
+    can degrade gracefully -- but swallowing the reason entirely made a real
+    bug (COM uninitialised on this thread in the packaged build) look
+    identical to "nothing is playing", and cost a testing session to find.
+    """
+    print(f"  [media: {what} failed -- {type(exc).__name__}: {exc}]")
+
+
 def _volume_endpoint():
+    # COM has to be initialised on whichever thread touches it. The main
+    # thread of the packaged app doesn't do that on its own the way a plain
+    # python process does, so pycaw raised CoInitialize-not-called and every
+    # volume call silently returned None -- working from source, broken as an
+    # .exe. Safe to call repeatedly; it refcounts per thread.
+    try:
+        import comtypes
+        comtypes.CoInitialize()
+    except Exception:
+        pass
     return _AudioUtilities.GetSpeakers().EndpointVolume
 
 
@@ -58,7 +79,8 @@ def get_volume() -> int | None:
         return None
     try:
         return round(_volume_endpoint().GetMasterVolumeLevelScalar() * 100)
-    except Exception:
+    except Exception as exc:
+        _note("reading the volume", exc)
         return None
 
 
@@ -70,7 +92,8 @@ def set_volume(percent: int) -> bool:
         level = max(0, min(100, percent)) / 100
         _volume_endpoint().SetMasterVolumeLevelScalar(level, None)
         return True
-    except Exception:
+    except Exception as exc:
+        _note("setting the volume", exc)
         return False
 
 
@@ -89,7 +112,8 @@ def mute(should_mute: bool = True) -> bool:
     try:
         _volume_endpoint().SetMute(should_mute, None)
         return True
-    except Exception:
+    except Exception as exc:
+        _note("muting", exc)
         return False
 
 
@@ -97,7 +121,8 @@ def _run(coro):
     """winsdk's API is async; every call here is a single quick round-trip."""
     try:
         return asyncio.run(coro)
-    except Exception:
+    except Exception as exc:
+        _note("talking to the media session", exc)
         return None
 
 

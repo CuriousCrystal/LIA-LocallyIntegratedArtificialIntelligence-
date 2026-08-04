@@ -76,6 +76,11 @@ COMMAND = re.compile(r"<command-(name|message|args)>.*?</command-\1>", re.S)
 CONTINUATION = re.compile(
     r"^This session is being continued from a previous conversation.*", re.S
 )
+# Local slash-commands (/model and friends) leave their own caveat banner and
+# stdout in the log. The harness talking to itself, not anything typed.
+LOCAL_CMD = re.compile(
+    r"<local-command-(caveat|stdout)>.*?</local-command-\1>", re.S
+)
 
 
 def clean_user(text: str) -> tuple[str, list[str]]:
@@ -93,6 +98,7 @@ def clean_user(text: str) -> tuple[str, list[str]]:
     text = REMINDER.sub("", text)
     text = COMMAND.sub("", text)
     text = CONTINUATION.sub("", text)
+    text = LOCAL_CMD.sub("", text)
     return text.strip(), notes
 
 

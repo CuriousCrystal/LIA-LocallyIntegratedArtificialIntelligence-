@@ -42,6 +42,10 @@ $pyinstaller = @(
     '--collect-all', 'sherpa_onnx',     # speaker recognition
     '--hidden-import', 'pystray._win32',
     '--hidden-import', 'comtypes',
+    # Imported inside a function in library.py, and the package name ("docx")
+    # doesn't match the distribution name ("python-docx"), which is exactly the
+    # combination PyInstaller is most likely to miss.
+    '--hidden-import', 'docx',
     '--paths', 'LIA',
     'LIA\app.py'
 )
@@ -62,10 +66,6 @@ if (Test-Path $voicesSrc) { Copy-Item $voicesSrc (Join-Path $new 'voices') -Recu
 # analysis since it's data, not code.
 $modelsSrc = Join-Path $PSScriptRoot 'models'
 if (Test-Path $modelsSrc) { Copy-Item $modelsSrc (Join-Path $new 'models') -Recurse -Force }
-
-# The tools-reference PDF, for the "DECODE" passcode to read from.
-$docsSrc = Join-Path $PSScriptRoot 'docs'
-if (Test-Path $docsSrc) { Copy-Item $docsSrc (Join-Path $new 'docs') -Recurse -Force }
 
 # Carry across whatever the live app already had, so nothing you've added or
 # said is lost in the swap.
