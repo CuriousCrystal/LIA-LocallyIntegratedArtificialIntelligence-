@@ -23,3 +23,10 @@ LIA/models/*.onnx
 # API keys, if you ever put one in a file instead of an environment variable.
 .env
 .env.*
+
+# plain-text conversions of library documents, regenerated on demand
+extracted/
+# what she took each request to mean -- your usage, not code
+intent_log.jsonl
+# database backups
+*.bak-*

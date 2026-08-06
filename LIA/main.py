@@ -43,6 +43,7 @@ import library
 import llm
 import media
 import memory
+import music
 import speaker_id
 import voice
 from config import (
@@ -58,7 +59,10 @@ from config import (
     CONVERSATION_WINDOW_SECONDS,
     GREETING_WINDOW_SECONDS,
     GREET_ON_START,
+    AUTO_EXTRACT_FACTS,
+    DIARY_ENABLED,
     LIBRARY_DIR,
+    MUSIC_DIR,
     LIBRARY_AUTO_READ,
     BARGE_IN,
     ECHO_MATCH_RATIO,
@@ -161,12 +165,43 @@ def build_system_message(state: dict | None = None) -> dict:
             f" of date -- they are {name} now."
         )
 
-    others = {k: v for k, v in facts.items() if k != "name"}
+    # Notes are things they asked her to keep, in their words. Listed apart
+    # from the rest so they don't read as "note 1: ..." trivia, and so it's
+    # clear these were given rather than worked out.
+    notes = [v for k, v in facts.items() if k.startswith("note_")]
+    others = {k: v for k, v in facts.items()
+              if k != "name" and not k.startswith("note_")}
     if others:
         fact_lines = "\n".join(f"- {k.replace('_', ' ')}: {v}" for k, v in others.items())
         content += f"\n\nThings I remember about you:\n{fact_lines}"
+    if notes:
+        content += ("\n\nThings they asked you to remember, in their own words:\n"
+                    + "\n".join(f"- {n}" for n in notes))
 
     return {"role": "system", "content": content}
+
+
+def trim_repeated_name(sentence: str, name: str, already_used: bool) -> str:
+    """Drop your name from a sentence if she's already used it this reply.
+
+    The system prompt asks her to use it sparingly and a 3B ignores that --
+    observed live saying "How about you, Wade?" and "What would you like to
+    talk about now, Wade?" in consecutive sentences, which is how a call centre
+    talks, not a friend. Only the vocative forms are removed (", Wade" and
+    "Wade, ..."), so "Wade's birthday" or a genuine mention survives.
+    """
+    if not name or not already_used:
+        return sentence
+    escaped = re.escape(name)
+    sentence = re.sub(rf",\s*{escaped}\b(?=[\s.!?,]|$)", "", sentence)
+    # Recapitalise: removing a leading "Wade, " leaves the sentence starting on
+    # a lowercase word, which Piper reads with a noticeably flat opening.
+    stripped = re.sub(rf"^\s*{escaped},\s*", "", sentence)
+    if stripped is not sentence and stripped[:1].islower():
+        stripped = stripped[0].upper() + stripped[1:]
+    sentence = stripped
+    sentence = re.sub(rf"\b{escaped}\b\s*([.!?])", r"\1", sentence)
+    return re.sub(r"\s+([.!?,])", r"\1", sentence).strip()
 
 
 def build_memory_context(user_input: str, query_vec=None) -> dict | None:
@@ -492,6 +527,50 @@ def handle_command(cmd: str, speaker: voice.Speaker, state: dict) -> bool:
                 print("[couldn't read the volume]\n")
                 speaker.say("I couldn't read the volume just now.")
 
+    elif name == "/track":
+        if not music.available():
+            print("[music playback needs sounddevice and soundfile]\n")
+            speaker.say("I can't play music right now -- something's missing on my side.")
+            return True
+
+        listing = music.tracks()
+        if arg == "stop":
+            was = music.now_playing()
+            music.stop()
+            print(f"[stopped {was}]\n" if was else "[nothing was playing]\n")
+            speaker.say(f"Stopped {was}." if was else "Nothing was playing.")
+            return True
+
+        if not listing:
+            print(f"[no music yet -- put files in {MUSIC_DIR}]\n")
+            speaker.say("I haven't got any music yet. Put some files in my music folder "
+                        "and I'll play them.")
+            return True
+
+        if arg in ("list", ""):
+            print("[her music]")
+            for index, path in enumerate(listing, start=1):
+                print(f"  {index}. {music.describe(path)}")
+            print()
+            names = "; ".join(f"number {i}, {music.describe(p)}"
+                              for i, p in enumerate(listing[:5], start=1))
+            more = f", and {len(listing) - 5} more" if len(listing) > 5 else ""
+            speaker.say(f"I have {len(listing)}: {names}{more}.")
+            return True
+
+        chosen = music.find(int(arg)) if arg.isdigit() else music.search(arg)
+        if chosen is None:
+            print(f"[no track {arg} -- she has {len(listing)}]\n")
+            speaker.say(f"I don't have that one. There are {len(listing)} to pick from.")
+            return True
+
+        if music.play(chosen):
+            print(f"[playing: {music.describe(chosen)}]\n")
+            speaker.say(f"Playing {music.describe(chosen)}.")
+        else:
+            print(f"[couldn't play {chosen.name}]\n")
+            speaker.say("I couldn't open that one.")
+
     elif name == "/library":
         # A voice-triggered scan ("Lia, read my files") used to only print its
         # result -- silent on anything you can't see, i.e. exactly when you
@@ -701,6 +780,46 @@ def wait_for_her(speaker: voice.Speaker, listener, state: dict) -> str | None:
     return None
 
 
+# "Remember that the wifi password is hunter2", "don't forget I hate coriander".
+# Stored verbatim rather than passed to the model to summarise into a key and a
+# value: the whole point of this is that she keeps what you actually said, and
+# a 3B paraphrasing it is how "sister_name" and "visiting_sister_name" both
+# ended up in the database meaning the same thing.
+_REMEMBER_THIS = re.compile(
+    r"^(?:lia[,\s]+)?(?:please\s+)?(?:remember|note|don'?t forget)\s+"
+    r"(?:that\s+|this[:,]?\s+|about\s+)?(.+)",
+    re.IGNORECASE,
+)
+
+
+def remember_explicitly(text: str) -> str | None:
+    """Store something she was directly told to keep. Returns confirmation."""
+    match = _REMEMBER_THIS.match(text.strip())
+    if not match:
+        return None
+    note = re.sub(r"[\s.]+$", "", match.group(1).strip())
+    if len(note) < 3:
+        return None
+
+    if NO_SAVE:
+        return f"Got it -- though I'm not saving anything this session."
+
+    existing = db.get_all_facts()
+    # Telling her the same thing twice shouldn't fill her head with copies of
+    # it -- the duplicate-facts problem this whole change was meant to end.
+    for key, value in existing.items():
+        if key.startswith("note_") and value.strip().lower() == note.lower():
+            return f"I already have that one -- {note}."
+
+    numbers = [int(k.split("_")[1]) for k in existing if k.startswith("note_")
+               and k.split("_")[-1].isdigit()]
+    db.upsert_fact(f"note_{max(numbers, default=0) + 1}", note)
+    # "remember to buy milk" doesn't take "that" -- "I'll remember that to buy
+    # milk" is the kind of small wrongness that makes her sound like software.
+    joiner = ":" if note.lower().startswith("to ") else " that"
+    return f"Got it -- I'll remember{joiner} {note}."
+
+
 def claims_identity(text: str) -> bool:
     """Does this sound like them confirming who they are -- "it's Wade"?
 
@@ -765,6 +884,31 @@ def accept_spoken(spoken: str, state: dict) -> str | None:
     return None
 
 
+# "play number 1", "play song three", "play track 2" -- her own music, by
+# position. Numbers are spelled out as often as not, so the words are accepted
+# too rather than making you say the digit.
+_SPOKEN_NUMBERS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
+    "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+    "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6,
+    "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10,
+}
+_PLAY_NUMBER = re.compile(
+    r"\bplay\s+(?:the\s+)?(?:number|song|track|song number|track number|no\.?)?\s*"
+    r"([0-9]+|" + "|".join(_SPOKEN_NUMBERS) + r")\b(?:\s+song)?",
+    re.IGNORECASE,
+)
+
+
+def track_request(text: str) -> int | None:
+    """Which numbered track they asked for, if any."""
+    match = _PLAY_NUMBER.search(text)
+    if not match:
+        return None
+    token = match.group(1).lower()
+    return int(token) if token.isdigit() else _SPOKEN_NUMBERS.get(token)
+
+
 def as_instruction(text: str) -> str:
     """Turn a spoken instruction into its command form, if it is one.
 
@@ -785,8 +929,16 @@ def as_instruction(text: str) -> str:
     if alarms.would_schedule(text):
         return text
 
+    # Before the phrase matcher, because "play number 3" would otherwise be
+    # claimed by /media play and resume someone else's browser tab instead.
+    number = track_request(text)
+    if number is not None:
+        intent.log_matched(text, f"/track {number}")
+        return f"/track {number}"
+
     matched = spoken_command(text)
     if matched:
+        intent.log_matched(text, matched)
         return matched
     guessed = intent.route(text)
     if guessed:
@@ -807,11 +959,29 @@ def speech_hint() -> str:
     return "This is a conversation with Lia. " + " ".join(sorted(names))
 
 
+def _is_own_echo(heard: str, speaker: "voice.Speaker | None") -> bool:
+    """Did the mic just pick up her own voice coming back?
+
+    Checked on every transcript, not only while she's mid-sentence. Her spoken
+    confirmations were being heard a moment after she finished and stored as
+    things *you* had said -- her real memory ended up holding "There's nothing
+    new to read, I've already read everything in there" as a line of Wade's,
+    which she then quoted back at him as his own words.
+    """
+    if speaker is None or not speaker.enabled:
+        return False
+    if speaker.sounds_like_me(heard, ratio=ECHO_MATCH_RATIO):
+        print(f'  [ignored my own voice: "{heard[:60]}"]'.ljust(70), end="\r", flush=True)
+        return True
+    return False
+
+
 def read_input(
     listener: voice.Listener | None,
     state: dict,
     keys: "Keyboard | None",
     controls: "Controls | None" = None,
+    speaker: "voice.Speaker | None" = None,
 ) -> str:
     """The next turn, however it arrives -- spoken or typed."""
     global PROMPT_HINT
@@ -828,6 +998,8 @@ def read_input(
                 abort=(lambda: bool(controls and (controls.quit.is_set() or controls.close_now.is_set()))),
                 on_speech_start=prewarm,
             )
+            if spoken and _is_own_echo(spoken, speaker):
+                spoken = None
             if spoken:
                 process_voice_sample(spoken, listener.last_audio, state)
                 meant_for_her = accept_spoken(spoken, state)
@@ -857,7 +1029,7 @@ def read_input(
             return typed
 
         spoken = listener.listen(hint=speech_hint())
-        if not spoken:
+        if not spoken or _is_own_echo(spoken, speaker):
             print("  [didn't catch that]\n")
             return ""
         process_voice_sample(spoken, listener.last_audio, state)
@@ -876,6 +1048,8 @@ def read_input(
         if typed is not None:
             state["voice_match"] = None
             return as_instruction(typed) if typed else typed
+        if spoken and _is_own_echo(spoken, speaker):
+            continue
         if spoken:
             process_voice_sample(spoken, listener.last_audio, state)
             meant_for_her = accept_spoken(spoken, state)
@@ -996,15 +1170,19 @@ def end_session(session_id: str, short_term: list[dict]):
     if NO_SAVE:
         print("\n[--no-save: skipping diary and fact extraction]\n")
         return
+    if not (DIARY_ENABLED or AUTO_EXTRACT_FACTS):
+        return
     transcript = format_transcript(short_term)
 
-    print("\nLIA is writing in her diary...")
-    entry = diary.write_entry(session_id, transcript)
-    print(f"\n[diary entry]\n{entry}\n")
+    if DIARY_ENABLED:
+        print("\nLIA is writing in her diary...")
+        entry = diary.write_entry(session_id, transcript)
+        print(f"\n[diary entry]\n{entry}\n")
 
-    facts = memory.extract_and_store_facts(transcript)
-    if facts:
-        print(f"[remembered: {', '.join(facts.keys())}]")
+    if AUTO_EXTRACT_FACTS:
+        facts = memory.extract_and_store_facts(transcript)
+        if facts:
+            print(f"[remembered: {', '.join(facts.keys())}]")
 
 
 _SINGLE_INSTANCE_MUTEX = "Global\\Lia_Companion_SingleInstance"
@@ -1134,7 +1312,7 @@ def main(controls: "Controls | None" = None):
                 # You cut her off last turn -- what you said is already waiting.
                 user_input, pending_input = as_instruction(pending_input), None
             else:
-                user_input = read_input(listener, state, keys, controls)
+                user_input = read_input(listener, state, keys, controls, speaker)
         except (EOFError, KeyboardInterrupt):
             user_input = "bye"
 
@@ -1157,6 +1335,14 @@ def main(controls: "Controls | None" = None):
         if handle_command(user_input, speaker, state):
             if state["listening"] and listener is None:
                 listener = voice.Listener()
+            continue
+
+        # Stored word for word, before the model can rephrase it into something
+        # she'd rather have heard.
+        remembered = remember_explicitly(user_input)
+        if remembered is not None:
+            print(f"LIA: {remembered}\n")
+            speaker.say(remembered)
             continue
 
         # Checked deterministically, before the LLM ever sees it -- a timer
@@ -1210,6 +1396,8 @@ def main(controls: "Controls | None" = None):
         status("thinking")
         pieces = []
         sentences = voice.SentenceBuffer()
+        her_name_for_you = db.get_all_facts().get("name", "")
+        used_your_name = False
         try:
             for piece in llm.chat_stream(messages):
                 if controls is not None and controls.quit.is_set():
@@ -1221,7 +1409,11 @@ def main(controls: "Controls | None" = None):
                 pieces.append(piece)
                 # Start speaking sentence one while the rest is still generating.
                 for sentence in sentences.feed(piece):
-                    speaker.say(sentence)
+                    spoken_line = trim_repeated_name(sentence, her_name_for_you, used_your_name)
+                    if her_name_for_you and re.search(rf"\b{re.escape(her_name_for_you)}\b",
+                                                      spoken_line):
+                        used_your_name = True
+                    speaker.say(spoken_line)
         except KeyboardInterrupt:
             speaker.drop_pending()
             print("\n  [interrupted]\n")
@@ -1238,7 +1430,7 @@ def main(controls: "Controls | None" = None):
             continue
 
         clear_status()
-        speaker.say(sentences.flush())
+        speaker.say(trim_repeated_name(sentences.flush(), her_name_for_you, used_your_name))
         reply = "".join(pieces).strip()
         print("\n")
 

@@ -181,6 +181,57 @@ A(callout("<b>Measured, not assumed:</b> 30 of 32 across repeated runs, includin
           "outright, where the rules hadn't. A model this size generalises from cases, not "
           "principles."))
 
+A(H2("Deciding what she's allowed to do on her own"))
+A(P("A run of changes with one thing in common: she stopped doing things unprompted."))
+A(bullets([
+    "<b>She waits to be spoken to.</b> No greeting at login — she starts when the computer does, "
+    "which is rarely when anyone wants to talk. Greeting an empty room and then going quiet by "
+    "the time you sat down was worse than silence.",
+    "<b>She remembers only what she's told to.</b> “Remember that…” keeps something, word for "
+    "word. Automatic fact extraction and the diary are both off.",
+    "<b>Her own music.</b> Files in a <font face='Courier'>music/</font> folder, played by number "
+    "through her own audio — the first time she can <i>start</i> something rather than only "
+    "operating a remote over another app. She ducks it under her voice instead of stopping it.",
+    "<b>Documents convert once.</b> Every format becomes plain text on first read, so nothing "
+    "downstream knows or cares what it started as; re-reading is 25&times; faster.",
+    "<b>Every interpretation is logged.</b> What was said, what she took it to mean, and whether "
+    "the phrase list or the model decided — the raw material for a future fine-tune on real "
+    "phrasings rather than invented ones.",
+]))
+A(callout("<b>The reason the memory changes happened at all</b> is worth recording, because it "
+          "wasn't a preference. Testing her had been writing into her real memory for days: a "
+          "dozen piped “hello”s became stored turns, and each test run ended with her writing a "
+          "diary entry about a conversation that never happened. One of those reflected on the "
+          "person “moving between unrelated topics” — read off a list of test commands. Invented "
+          "history is indistinguishable from real history once it's in the database, and it "
+          "shapes every reply afterwards. A <font face='Courier'>--no-save</font> flag now exists "
+          "so testing leaves no trace, and the fabricated entries were deleted."))
+
+A(H2("Hearing herself"))
+A(P("Reported from real use as two vague complaints — “she had trouble reading” and “she keeps "
+    "calling me out” — which turned out to share one cause, found by reading her actual stored "
+    "memories rather than guessing. <b>She was recording her own voice as things Wade had "
+    "said</b>, then quoting them back to him as his own words."))
+A(bullets([
+    "<b>Her own speech, heard back.</b> Echo detection only ran <i>while</i> she was talking, to "
+    "make interrupting her work. The moment she finished, her spoken confirmation came back "
+    "through the speakers and was stored as his turn — “There's nothing new to read, I've already "
+    "read everything in there” sat in her memory as a line of his.",
+    "<b>The speech recogniser's own prompt.</b> Whisper is given a short vocabulary hint so it "
+    "spells names correctly; handed near-silence, it returns that prompt as the transcript. "
+    "“This is a conversation with Lia” was stored as something he'd said, five separate times.",
+]))
+A(P("Both are filtered now, on every input path rather than just the interrupt one, and the "
+    "contaminated memories were deleted. The name repetition was a separate, smaller thing: the "
+    "system prompt asks her to use it sparingly, a 3B ignores that, so it's enforced in code "
+    "instead — vocative uses after the first are stripped from what she says, while genuine "
+    "mentions survive.", "LiaNote"))
+A(callout("<b>Worth noticing about the diagnosis:</b> neither complaint described what was "
+          "actually wrong. “Trouble reading” and “calling me out” both sounded like the model "
+          "being poor, and both were a microphone hearing the wrong thing. Reading her real "
+          "stored memories took a minute and pointed straight at it; reasoning about the "
+          "symptoms would not have."))
+
 A(H2("Not yet built"))
 A(bullets([
     "Opening or closing applications.",

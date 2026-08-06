@@ -447,6 +447,63 @@ SUMMARIES = {
         "keyword. Also fixed “set a timer for 5”, which had been setting an alarm for five "
         "o'clock. Verified 9 real phrasings all schedule and 8 conversational sentences "
         "containing times still don't, then watched a real alarm fire and say “Please wake up.”"),
+    88: ("Asked for a full re-run checking everything discussed so far.",
+        "18 automated checks plus a live run of the packaged app: no passcode gate, the real "
+        "clock, the real volume, an alarm set with his own words, natural phrasing routed "
+        "correctly, and a question answered from the indexed novel."),
+    89: ("Noticed her diary entry from that test run was odd, and asked whether it could be fixed.",
+        "It could, and it mattered more than it looked. Days of testing had been writing into her "
+        "real memory &mdash; a dozen piped “hello”s stored as turns, and a diary entry per run "
+        "reflecting on conversations that never happened, one of which characterised him as "
+        "“moving between unrelated topics” from a list of test commands. Removed 4 fabricated "
+        "entries and 12 memories across both databases (after backing them up), and added "
+        "<font face='Courier'>--no-save</font> so testing leaves nothing behind."),
+    90: ("Asked for another complete test.",
+        "21 checks, all passing. Found in the process that "
+        "<font face='Courier'>--no-save</font> didn't reach the packaged app at all &mdash; the "
+        "exe starts from <font face='Courier'>app.py</font>, which never runs main.py's entry "
+        "block, so the flag existed but did nothing precisely where the polluting testing "
+        "happened. Fixed and verified. Also noted honestly that her answer about the novel was "
+        "worse this run than last: retrieval found the right passage both times, but the 3B "
+        "garbled the details, calling Harry “Dudley's little brother”."),
+    91: ("Asked whether to train her as a new LLM.",
+        "No, plainly. Training from scratch is millions of dollars of compute; fine-tuning a 3B "
+        "needs more VRAM than inference and, more to the point, teaches style rather than "
+        "reasoning &mdash; it wouldn't fix the error he'd just seen. Pointed at the cheaper "
+        "levers instead, in order."),
+    92: ("Asked about training a quantized small custom model instead.",
+        "A sharper question, and given a real answer: his model is already 4-bit quantized, and "
+        "QLoRA is the technique that makes low-VRAM fine-tuning viable &mdash; 0.5B to 1B fits in "
+        "his 4GB, 3B doesn't. Named the one case where it genuinely wins: narrow classification, "
+        "which his intent router happens to be. Recommended waiting until real use had produced "
+        "real training data rather than inventing examples."),
+    93: ("Asked whether the Amy voice is free or subscription.",
+        "Free, open-source Piper, already sitting on disk as a 63MB file &mdash; along with two "
+        "others he'd downloaded. Flagged honestly that the voice files record their dataset but "
+        "not their licence, so the exact terms should be checked per voice if he ever publishes "
+        "anything with one."),
+    94: ("Six changes: wait to be woken rather than greeting on her own; convert documents to text "
+        "once; play music from her own library by number; remember only what he tells her; add "
+        "Notion access; and start logging intents for a future fine-tune.",
+        "Notion dropped at his request. The other five built and verified end to end in the "
+        "packaged app: she now starts silent, documents convert once (25&times; faster to "
+        "re-read, though honestly <i>larger</i> on disk for epub, which is already compressed), a "
+        "new <font face='Courier'>music.py</font> plays her own files by number through her own "
+        "audio and ducks them under her voice, memory is explicit-only with duplicates refused, "
+        "and every interpretation is logged as training data. Two bugs caught while testing: "
+        "“play number 3” was being claimed by the media remote, and "
+        "<font face='Courier'>--no-save</font> didn't cover explicit remembering."),
+    96: ("Reported she was having trouble reading and “keeps calling me out”, and asked for the "
+        "conversion step to be removed so he could do it by hand.",
+        "Removed the conversion cache as asked. The two complaints turned out to share one cause, "
+        "found by reading her actual stored memories rather than reasoning from the symptoms: "
+        "<b>she was recording her own voice as things Wade had said</b> and quoting them back to "
+        "him. Echo detection only ran while she was mid-sentence, so her spoken confirmations "
+        "were heard a moment after she finished and stored as his turns; and Whisper hands its "
+        "vocabulary hint back as a transcript when given near-silence, so “This is a conversation "
+        "with Lia” was stored as his words five times over. Both filtered on every input path, "
+        "and the contaminated memories deleted. Name repetition fixed separately in code, since "
+        "asking a 3B to use it sparingly doesn't take."),
 }
 
 PHASES = {
@@ -463,6 +520,7 @@ PHASES = {
     56: "Deciding what's next",
     62: "Imagining a face",
     70: "What a week of real use broke",
+    89: "Deciding what she does on her own",
 }
 
 

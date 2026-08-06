@@ -80,6 +80,26 @@ In the terminal you can type instead, and these commands work:
 bye                end the session
 ```
 
+**She won't quote herself back at you.** Two things used to end up stored as
+things *you* had said, and she would later repeat them to you as your own
+words:
+
+- **Her own voice**, picked up through the speakers a moment after she finished
+  speaking. Echo detection used to run only *while* she was talking, so her
+  spoken confirmations landed in memory as yours — *"There's nothing new to
+  read, I've already read everything in there"* was sitting in her memory as a
+  line of Wade's.
+- **Whisper's vocabulary hint.** Given near-silence, the recogniser hands its
+  own prompt back as a transcript, so *"This is a conversation with Lia"*
+  became a stored user turn.
+
+Both are filtered now, on every input path.
+
+**She uses your name once, not every sentence.** The system prompt asks for
+that and a 3B ignores it, so it's enforced in code: vocative uses after the
+first are removed from what she says. Genuine mentions ("Wade's birthday")
+survive.
+
 **Interrupting her:** just start talking. The mic stays open while she speaks,
 and anything it hears is checked against what she's currently saying — her own
 voice coming back through the speakers is ignored, yours cuts her off. Clean on
@@ -149,6 +169,10 @@ embedding — and tells you what you're in for: *"On it"* for something short, o
 *"On it, that'll take around 25 minutes"* for a book. She says so again when
 she's finished.
 
+Files are read directly, every time. There is deliberately **no conversion
+cache** — she doesn't keep a second, plain-text copy of your library. Convert
+things yourself if you want them converted.
+
 `.docx` is Word's current format only — not the old binary `.doc`, and not
 Kindle's `.mobi`/`.azw`. Converting those to `.epub` or `.docx` first works.
 
@@ -188,7 +212,22 @@ by testing it: search-engine operators like `site:reddit.com` make the
 underlying search decline entirely (it answers as if it has no web access at
 all) — plain natural language is what actually works.
 
-**Music** needs nothing at all — it uses Windows' own System Media Transport
+**Her own music** lives in `LIA\music\` (or `dist\Lia\music\`). Drop audio in
+and she plays it by number — she owns these, so she can start one from nothing:
+
+```
+"what music do you have"    →  she reads out the list
+"play number 1"  /  "play song 3"  /  "play the second song"
+"play Fireflies"            →  by name, if the filename matches
+"stop the song"
+```
+
+Numbering follows filename order, so number 3 means the same thing tomorrow.
+Playback goes through her own audio — no window opens — and while she speaks
+the music drops to a murmur rather than stopping. See
+[`music/README.md`](music/README.md).
+
+**Someone else's music** needs nothing at all — it uses Windows' own System Media Transport
 Controls, the same thing behind your keyboard's media keys, so it works with
 whatever's actually playing (Spotify, a browser tab, Windows Media Player)
 without her needing to know which. It's a remote, not a jukebox — it can't
@@ -248,19 +287,49 @@ usage data.
 
 ## How she remembers
 
-Three layers, all in `lia_memory.db` (plain SQLite, in the project root — inspect
-it any time with `sqlite3 lia_memory.db`):
+**She only keeps what you tell her to.** Say *"remember that…"*, *"don't forget
+I…"*, *"note that…"* and it's stored, word for word:
 
-- **facts** — durable things about you, pulled out at the end of each session and
-  injected into every system prompt
-- **memories** — every turn, embedded, searched by cosine similarity. Only *your*
-  turns are retrieved; hers competing for the same slots made her quote her own
-  speculation back as fact.
-- **diary** — a short private reflection she writes when a conversation ends
+```
+"remember that the wifi password is bluebird"
+"don't forget my sister is called Anaya"
+```
+
+Nothing else about you is written down. She doesn't decide for herself what's
+worth keeping, and she doesn't write a diary.
+
+That's `AUTO_EXTRACT_FACTS = False` and `DIARY_ENABLED = False` in `config.py`.
+Both used to be on, and both are off for the same reason: **she was inventing
+history that read exactly like real history.** The extractor stored the same
+fact twice under different keys, and the diary once reflected at length on the
+person "moving between unrelated topics" — drawn entirely from a list of test
+commands. Once that's in the database it colours every later reply, and there's
+nothing marking it as a guess. Turn either back on if you'd rather have it.
+
+Telling her the same thing twice doesn't store it twice — she says she already
+has it.
+
+What's still in `lia_memory.db` (plain SQLite — inspect it any time with
+`sqlite3 lia_memory.db`):
+
+- **facts** — your name, plus the notes you explicitly asked her to keep
+- **memories** — every turn, embedded, searched by cosine similarity. Only
+  *your* turns are retrieved; hers competing for the same slots made her quote
+  her own speculation back as fact. A relevance floor (`MEMORY_MIN_SCORE`)
+  drops weak matches rather than forcing in the closest thing available.
 
 A conversation ends when you say `bye`, or on its own after `IDLE_MINUTES` of
-silence — an always-on companion never gets a goodbye, and without the timeout
-she'd never learn anything.
+silence.
+
+### Testing her without leaving traces
+
+```powershell
+python LIA\main.py --no-save      # or: dist\Lia\Lia.exe --no-save
+```
+
+Nothing reaches the database — no stored turns, no notes, no facts. Alarms are
+the deliberate exception: those are an action you asked for, not history she
+wrote about you.
 
 ## The files
 
@@ -278,9 +347,12 @@ she'd never learn anything.
 | `internet.py` | the one deliberate offline exception — weather, and online lookups |
 | `media.py` | Windows media control (SMTC) and volume (Core Audio) |
 | `alarms.py` | spoken alarms and timers — regex-parsed, never guessed by the model |
+| `music.py` | her own music — files in `music/`, played by number |
+| `intent.py` | works out what you meant when no phrase matches |
 | `speaker_id.py` | voice recognition — is this the enrolled voice or not |
 | `voices/` | drop your own voice files here — see `voices/README.md` |
 | `library/` | drop PDFs here — see `library/README.md` |
+| `music/` | drop audio here — see `music/README.md` |
 | `models/` | the speaker-recognition model — see `models/README.md` |
 
 ## Tuning

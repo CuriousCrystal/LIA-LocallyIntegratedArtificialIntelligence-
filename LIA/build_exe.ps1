@@ -67,6 +67,10 @@ if (Test-Path $voicesSrc) { Copy-Item $voicesSrc (Join-Path $new 'voices') -Recu
 $modelsSrc = Join-Path $PSScriptRoot 'models'
 if (Test-Path $modelsSrc) { Copy-Item $modelsSrc (Join-Path $new 'models') -Recurse -Force }
 
+# Her own music folder, so the packaged app has somewhere to look.
+$musicSrc = Join-Path $PSScriptRoot 'music'
+if (Test-Path $musicSrc) { Copy-Item $musicSrc (Join-Path $new 'music') -Recurse -Force }
+
 # Carry across whatever the live app already had, so nothing you've added or
 # said is lost in the swap.
 foreach ($keep in @('library', 'lia_memory.db')) {

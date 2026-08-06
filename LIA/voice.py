@@ -63,6 +63,23 @@ _MARKDOWN = re.compile(r"[*_`#]")
 _WORDS_ONLY = re.compile(r"[a-z']+")
 
 
+def _echoes_hint(text: str, hint: str) -> bool:
+    """Is this transcript just the vocabulary hint handed back?
+
+    Every word of it drawn from the hint, and no longer than the hint itself.
+    Deliberately strict on both counts: "Lia" alone is a real thing to say, so
+    a short utterance made only of hint words has to also be short enough to
+    plausibly *be* the hint before it's thrown away.
+    """
+    said = _WORDS_ONLY.findall(text.lower())
+    prompt = set(_WORDS_ONLY.findall(hint.lower()))
+    if not said or not prompt:
+        return False
+    if len(said) < 4:
+        return False  # too short to be the hint; let the wake word decide
+    return all(word in prompt for word in said)
+
+
 def speakable(text: str) -> str:
     """Strip anything that shouldn't be read aloud."""
     text = _STAGE_DIRECTION.sub(" ", text)
@@ -253,6 +270,13 @@ class Speaker:
         return overlap >= ratio
 
     def _worker(self):
+        def _duck_music(quieter: bool):
+            try:
+                import music
+                music.duck(quieter)
+            except Exception:
+                pass  # no music module, or nothing playing -- nothing to duck
+
         while True:
             text = self._queue.get()
             if text is None:
@@ -261,6 +285,10 @@ class Speaker:
             try:
                 self._speaking = True
                 self._recent.append(text)
+                # Drop her own music under her voice for the duration. Imported
+                # here rather than at module scope: music.py is optional, and
+                # voice.py has to keep working without it.
+                _duck_music(True)
                 self._engine.say(text)
             except KeyboardInterrupt:
                 pass
@@ -269,6 +297,11 @@ class Speaker:
                     print(f"\n[voice] playback failed: {exc}")
                     self._error_shown = True
             finally:
+                # Only lift it once she's actually finished the backlog, or a
+                # reply spoken as several sentences ducks and unducks between
+                # each one, which sounds like the music is broken.
+                if self._queue.empty():
+                    _duck_music(False)
                 self._speaking = False
                 self._queue.task_done()
 
@@ -525,4 +558,16 @@ class Listener:
         )
         text = " ".join(s.text for s in segments).strip()
         print(" " * 40, end="\r", flush=True)
-        return text or None
+
+        if not text:
+            return None
+
+        # Whisper hands the initial_prompt back verbatim when the audio is
+        # mostly silence -- it has nothing to transcribe and the prompt is the
+        # likeliest continuation. Found in her real memory: "This is a
+        # conversation with Lia" and "This is a conversation with Wade" were
+        # both stored as things Wade had said, and she later quoted them back
+        # at him as his own words. The hint is vocabulary, never speech.
+        if hint and _echoes_hint(text, hint):
+            return None
+        return text

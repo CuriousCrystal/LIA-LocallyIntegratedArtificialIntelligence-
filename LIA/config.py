@@ -28,6 +28,12 @@ MODEL_EMBED = "nomic-embed-text"
 # Absolute, so Lia finds the same memories no matter which directory you launch from.
 DB_PATH = str(DATA_DIR / "lia_memory.db")
 
+# Record what she took each spoken request to mean, to intent_log.jsonl. This
+# is the raw material for a future fine-tune on your own phrasings -- the one
+# use where a tiny model genuinely beats a bigger general one, and the one
+# thing that can't be manufactured up front. Costs a line of text per command.
+INTENT_LOG = True
+
 # How long Ollama holds the models in memory after a request. Ollama's default
 # is 5m, which means the first thing you say after a break costs ~9s of cold
 # start instead of ~2.4s. The trade is ~2GB of VRAM held the whole time (and
@@ -240,6 +246,15 @@ SPEAKER_ENROLL_TARGET = 3
 # asked for. See library/README.md.
 LIBRARY_DIR = BASE_DIR / "library"
 
+# Music she owns and can actually start, as opposed to media.py's remote
+# control over whatever some other app is already playing. Numbered by
+# filename order, so "play number three" is stable between sessions.
+MUSIC_DIR = BASE_DIR / "music"
+
+# How far music drops while she's speaking, rather than stopping it dead.
+MUSIC_DUCK_VOLUME = 0.15
+
+
 # Read new files automatically on startup. Off: a document sitting in the folder
 # is just available, not absorbed. She reads it when you ask.
 LIBRARY_AUTO_READ = False
@@ -266,7 +281,27 @@ CHUNK_OVERLAP = 150
 LIBRARY_MIN_SCORE = 0.45
 
 # Greet you when she starts up, instead of waiting silently.
-GREET_ON_START = True
+#
+# Off: she sits in the tray and says nothing until spoken to. An always-on
+# companion that greets the room at login is talking to nobody most of the
+# time -- she starts when you log in, not when you arrive.
+GREET_ON_START = False
+
+# --- what she's allowed to remember ---
+# Off: she never decides for herself what's worth keeping about you. She
+# remembers when you say "remember that ...", and not otherwise.
+#
+# The automatic version guessed, and guessed wrong in ways that stuck around --
+# it stored duplicates of the same fact under different keys, and once wrote
+# down a reflection about the person "moving between unrelated topics" that had
+# been drawn from a list of test commands. Invented history reads exactly like
+# real history once it's in the database.
+AUTO_EXTRACT_FACTS = False
+
+# Off: no end-of-session reflection is written at all. Her diary was her own
+# thinking rather than claims about you, but it was still written unprompted
+# and fed back into how she greets and reads you.
+DIARY_ENABLED = False
 
 # Written from her last diary entries, so the greeting is actually about you
 # rather than a canned line -- and so the diary finally gets read back.
@@ -352,6 +387,16 @@ SPOKEN_COMMANDS = {
         "what is the volume", "whats the volume", "what's the volume",
         "how loud is it", "current volume", "check the volume",
         "what is the volume right now", "how loud is the volume",
+    ],
+    # Her own music, by position: "play number one", "play song 3". Kept apart
+    # from /media play, which only resumes whatever another app already has
+    # loaded and can't start anything.
+    "/track list": [
+        "what music do you have", "what songs do you have", "list your music",
+        "list the songs", "what music have you got", "show me the songs",
+    ],
+    "/track stop": [
+        "stop the song", "stop that song", "stop your music", "turn the music off",
     ],
     "/library scan": [
         "read my files", "read my file", "read the file", "read the pdf",

@@ -28,9 +28,35 @@ model will pick one for "tell me something calming" rather than admit none
 apply. With somewhere to put ordinary conversation, it stops forcing the fit.
 """
 
+import json
 import re
+from datetime import datetime
 
 import llm
+from config import DATA_DIR, INTENT_LOG
+
+# Every decision, appended as one JSON object per line. Not for debugging --
+# it's the training data a future fine-tune would need, and the only way to
+# get it is from real use rather than invented examples. A few hundred rows of
+# "this is what he actually said, this is what she did with it" is worth more
+# than any amount of guessing at phrasings up front.
+_LOG_PATH = DATA_DIR / "intent_log.jsonl"
+
+
+def _log(text: str, decided: str | None, source: str):
+    if not INTENT_LOG:
+        return
+    try:
+        _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(_LOG_PATH, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps({
+                "at": datetime.now().isoformat(timespec="seconds"),
+                "said": text,
+                "decided": decided,
+                "source": source,
+            }, ensure_ascii=False) + "\n")
+    except Exception:
+        pass  # logging must never be the reason a turn fails
 
 # Cheap pre-filter: is this even plausibly about something she can do? Wrong
 # guesses here are cheap in one direction only -- a false positive costs one
@@ -218,6 +244,16 @@ def might_be_action(text: str) -> bool:
     return bool(words & ACTION_HINTS)
 
 
+def log_matched(text: str, command: str):
+    """Record a phrase the fast matcher already handled.
+
+    Logged too, not just the model's guesses: a fine-tune needs the confident,
+    correct cases as much as the uncertain ones, or it only ever sees the
+    hard examples and learns that everything is ambiguous.
+    """
+    _log(text, command, "matcher")
+
+
 def route(text: str) -> str | None:
     """The slash command they meant, or None to treat this as conversation.
 
@@ -240,7 +276,10 @@ def route(text: str) -> str | None:
         return None
 
     if not calls:
+        _log(text, None, "model-no-call")
         return None
 
     name = (calls[0].get("function") or {}).get("name")
-    return TOOL_COMMANDS.get(name)
+    command = TOOL_COMMANDS.get(name)
+    _log(text, command, f"model:{name}")
+    return command

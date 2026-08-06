@@ -142,6 +142,14 @@ def _read_text(path: Path) -> list[tuple[int, str]]:
 
 
 def extract(path: Path) -> list[tuple[int, str]]:
+    """Text of a document, as (page_or_chapter, text).
+
+    Read straight from the file every time. There was a conversion cache here
+    briefly -- it kept a plain-text copy of everything so re-reading skipped
+    the parsing libraries -- and it was removed by request: converting files is
+    something to do by hand, not something she should be quietly keeping a
+    second copy of your library for.
+    """
     suffix = path.suffix.lower()
     if suffix == ".pdf":
         return _read_pdf(path)

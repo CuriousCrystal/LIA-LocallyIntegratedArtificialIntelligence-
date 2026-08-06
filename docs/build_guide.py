@@ -32,8 +32,12 @@ A(table([
     ["No dot at all", "She isn't running — see <i>If something seems wrong</i>"],
 ], [45, 120]))
 
-A(P("She takes about half a minute to wake up properly after the computer starts. When she's ready "
-    "she'll say hello."))
+A(P("She takes about half a minute to be ready after the computer starts, and then <b>waits "
+    "quietly</b> — she won't greet you or say anything until you speak to her. Say "
+    "<i>“Lia”</i> whenever you want her."))
+A(P("She starts when you log in, which usually isn't the moment you actually want to talk. "
+    "Greeting an empty room and then falling silent by the time you sit down was worse than "
+    "simply waiting.", "LiaNote"))
 
 # ---------------------------------------------------------------- talking ---
 A(H1("Talking to her"))
@@ -99,9 +103,21 @@ A(P("<b>Say it however comes naturally.</b> All of these work: <i>“wake me in 
 A(P("<b>You can choose what she says.</b> <i>“Wake me by saying please wake up in 5 minutes”</i> "
     "and she'll say exactly that — not “your timer is up”. <i>“Remind me to stretch in 20 "
     "minutes”</i> gets you <i>“Time to stretch.”</i>"))
-A(P("Music is different: she can only control something already playing somewhere (Spotify, a "
-    "browser tab). She can't start a song from nothing — if nothing is playing anywhere, she'll "
-    "say so rather than pretend.", "LiaNote"))
+A(H2("Her own music"))
+A(P("Put audio files in her <b>music</b> folder and she'll play them by number — these are hers, "
+    "so she can start one from nothing:"))
+A(table([
+    ["Say this", "What happens"],
+    ["“what music do you have”", "She reads out the list, numbered"],
+    ["“play number 1” / “play song 3”", "Plays that track"],
+    ["“play Fireflies”", "By name, if the filename matches"],
+    ["“stop the song”", "Stops it"],
+], [55, 110]))
+A(P("Numbering follows filename order, so number 3 means the same thing tomorrow. While she's "
+    "talking the music drops to a murmur instead of stopping, and comes back up after."))
+A(P("<b>Someone else's music is different:</b> “play music” / “pause” controls whatever Spotify or "
+    "a browser tab already has loaded. She can't start a song there from nothing — if nothing is "
+    "playing anywhere, she'll say so rather than pretend.", "LiaNote"))
 
 A(H2("The weather, and looking things up"))
 A(P("Ask <b>“what's the weather like”</b> and she'll check, using your general location — no setup "
@@ -131,23 +147,29 @@ A(table([
 # ----------------------------------------------------------------- memory ---
 A(H1("What she remembers"))
 
-A(P("Lia remembers across days, not just within one conversation. There are three kinds of memory, "
-    "and they behave differently."))
+A(P("<b>Only what you tell her to.</b> Say <i>“remember that…”</i> or <i>“don't forget…”</i> and "
+    "she keeps it, in your words. Nothing else about you is written down."))
 
 A(table([
-    ["Kind", "What it is"],
-    ["Facts", "Important details about you — your name, people you mention, things you like. "
-              "She keeps these permanently and uses them naturally."],
-    ["Conversations", "Everything you've said. When you bring up a subject, she looks back for "
-                      "related things you've told her before."],
-    ["Her diary", "A short private reflection she writes at the end of each conversation. "
-                  "It's what makes her greeting feel like she's actually been thinking of you."],
-], [40, 125]))
+    ["Say this", "What happens"],
+    ["“remember that the wifi password is bluebird”", "Kept, word for word, permanently"],
+    ["“don't forget my sister is called Anaya”", "Same — and telling her twice won't store it twice"],
+], [70, 95]))
+
+A(P("She also keeps a searchable record of what you've said, so bringing up a subject lets her "
+    "find related things from before. But she no longer decides for herself what's worth "
+    "remembering about you, and she doesn't keep a diary."))
+
+A(callout("<b>Why that changed:</b> both used to be automatic, and both were quietly inventing "
+          "history. She'd store the same fact twice under different names, and once wrote a long "
+          "reflection about the person “moving between unrelated topics” — drawn entirely from a "
+          "list of test commands, not a real conversation. Once something like that is written "
+          "down it shapes every later reply, and nothing marks it as a guess. Better she keeps "
+          "less and all of it true."))
 
 A(H2("How a conversation ends"))
 A(P("You don't have to say goodbye. If you stop talking for about twelve minutes, she quietly "
-    "decides the conversation is over, writes her diary, and notes anything worth remembering. "
-    "Then she waits for you."))
+    "decides the conversation is over and waits for you."))
 
 A(P("You can also just say <b>“bye”</b> if you'd rather end it deliberately."))
 
