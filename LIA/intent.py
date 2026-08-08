@@ -90,8 +90,8 @@ TOOLS = [
         "function": {
             "name": "play_music",
             "description": (
-                "Resume or start playing whatever music or video is already loaded in an app "
-                "or browser tab. Use when they ask to play, resume, or put music on."
+                "List the music she has, so they can pick one. Use when they ask her to play "
+                "music or put something on without naming which track."
             ),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
@@ -100,23 +100,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "pause_music",
-            "description": "Pause or stop whatever is currently playing.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "next_track",
-            "description": "Skip forward to the next song or track.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "previous_track",
-            "description": "Go back to the previous song or track.",
+            "description": "Stop the music she is playing.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -196,10 +180,8 @@ TOOLS = [
 ]
 
 TOOL_COMMANDS = {
-    "play_music": "/media play",
-    "pause_music": "/media pause",
-    "next_track": "/media next",
-    "previous_track": "/media previous",
+    "play_music": "/track list",
+    "pause_music": "/track stop",
     "volume_up": "/volume up",
     "volume_down": "/volume down",
     "mute_sound": "/volume mute",

@@ -161,7 +161,7 @@ class LiaApp:
             MenuItem("Listening", self.toggle_listening, checked=lambda _: self._listening()),
             MenuItem("Speaking", self.toggle_voice, checked=lambda _: self._speaking()),
             Menu.SEPARATOR,
-            MenuItem("Write diary now", self.close_out),
+            MenuItem("End conversation now", self.close_out),
             MenuItem("Open log", self.open_log),
             Menu.SEPARATOR,
             MenuItem("Quit", self.quit),
@@ -170,7 +170,7 @@ class LiaApp:
         self.icon = Icon("Lia", make_icon(True, False), "Lia", menu)
         self.icon.run()
 
-        # Give her a moment to finish writing the diary on the way out.
+        # Give her a moment to close out cleanly on the way out.
         self.controls.stop()
         if self._thread is not None:
             self._thread.join(timeout=90)

@@ -212,53 +212,26 @@ by testing it: search-engine operators like `site:reddit.com` make the
 underlying search decline entirely (it answers as if it has no web access at
 all) — plain natural language is what actually works.
 
-**Her own music** lives in `LIA\music\` (or `dist\Lia\music\`). Drop audio in
-and she plays it by number — she owns these, so she can start one from nothing:
+**Music** lives in `LIA\music\` (or `dist\Lia\music\`). Drop audio in and she
+plays it by number:
 
 ```
-"what music do you have"    →  she reads out the list
+"what music do you have"    →  she reads out the numbered list
 "play number 1"  /  "play song 3"  /  "play the second song"
 "play Fireflies"            →  by name, if the filename matches
+"play some music"           →  she lists what she has, so you can pick
 "stop the song"
 ```
 
 Numbering follows filename order, so number 3 means the same thing tomorrow.
 Playback goes through her own audio — no window opens — and while she speaks
-the music drops to a murmur rather than stopping. See
-[`music/README.md`](music/README.md).
+the music drops to a murmur rather than stopping. `.mp3 .wav .flac .ogg .m4a
+.aiff`. See [`music/README.md`](music/README.md).
 
-**Someone else's music** needs nothing at all — it uses Windows' own System Media Transport
-Controls, the same thing behind your keyboard's media keys, so it works with
-whatever's actually playing (Spotify, a browser tab, Windows Media Player)
-without her needing to know which. It's a remote, not a jukebox — it can't
-start a track from nothing, and she'll say so honestly rather than guess:
-
-```
-"play music" / "pause music" / "next song" / "previous song"
-"what song is this" / "what's playing"
-```
-
-**Alarms and timers** are parsed by regex, never by the model — a timer has to
-fire at the right second, and precise extraction is exactly what a 3B is worst
-at. Say it however it comes out:
-
-```
-"remind me in 5 min"          "wake me in half an hour"
-"give me a nudge in 20 mins"  "let me know in ten minutes"
-"buzz me in an hour"          "set a timer for 5"
-"wake me up at 7am"           "wake me at half past 3"
-```
-
-Spoken numbers, vague durations ("a couple of minutes") and clock forms
-("half past three") all work. **You can also choose the words she wakes you
-with** — *"wake me by saying please wake up in 5 minutes"* and she says exactly
-that, rather than "your timer is up". *"Remind me to stretch in 20 minutes"*
-becomes *"Time to stretch."*
-
-They survive restarts, and she interrupts whatever's happening to say them.
-Ordinary conversation containing a time ("we talked for an hour yesterday")
-deliberately doesn't schedule anything — that needs an explicit word like
-*remind*, *wake* or *timer* as well.
+She plays **only her own files**. Controlling Spotify or a browser tab through
+Windows' media keys was built and then removed by request: it could operate
+someone else's player but never start anything, which made it a confusing
+sibling to a folder where she genuinely can.
 
 **Volume** talks to Windows' Core Audio API directly (via `pycaw`), not to a
 simulated key press — that was tried first and verified to silently do
@@ -345,7 +318,7 @@ wrote about you.
 | `app.py` | tray app wrapper for running her in the background |
 | `library.py` | reads PDFs and notes you drop in `library/` |
 | `internet.py` | the one deliberate offline exception — weather, and online lookups |
-| `media.py` | Windows media control (SMTC) and volume (Core Audio) |
+| `media.py` | system volume (Core Audio) |
 | `alarms.py` | spoken alarms and timers — regex-parsed, never guessed by the model |
 | `music.py` | her own music — files in `music/`, played by number |
 | `intent.py` | works out what you meant when no phrase matches |

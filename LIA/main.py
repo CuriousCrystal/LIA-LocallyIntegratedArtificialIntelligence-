@@ -73,7 +73,6 @@ from config import (
     RETRIEVAL_MIN_WORDS,
     WEATHER_TRIGGER_WORDS,
     INTERNET_TRIGGER_PHRASES,
-    MEDIA_TRIGGER_PHRASES,
     VOLUME_STEP,
     SPEAKER_ENROLL_TARGET,
 )
@@ -83,7 +82,7 @@ HELP = """
   /mic on|off     listen to you at all
   /openmic on|off open mic (just talk) vs push-to-talk (Enter to record)
   /wake on|off    only answer when you say her name
-  /media play|pause|next|previous   control whatever's playing on Windows
+  /track [n|name|list|stop]         play her own music from LIA/music/
   /volume up|down|mute|unmute       adjust the system volume
   /whoami [forget]                  voice-recognition status, or clear enrollment
   /alarms [cancel]                  list pending alarms/timers, or clear them
@@ -218,29 +217,6 @@ def build_memory_context(user_input: str, query_vec=None) -> dict | None:
             "These are their words, not yours. Treat them as the only record of the "
             "past you have -- do not invent anything else that was said or felt."
         ),
-    }
-
-
-def build_media_context(user_input: str) -> dict | None:
-    """What's currently playing, if they asked -- entirely local, no network."""
-    if not media.available():
-        return None
-    lowered = user_input.lower()
-    if not any(p in lowered for p in MEDIA_TRIGGER_PHRASES):
-        return None
-
-    info = media.now_playing()
-    if not info or not (info["title"] or info["artist"]):
-        return {
-            "role": "system",
-            "content": "They just asked what's playing, but nothing seems to be playing right "
-                       "now. Say so naturally.",
-        }
-    return {
-        "role": "system",
-        "content": f"Currently playing on their computer: \"{info['title']}\" by "
-                   f"{info['artist'] or 'an unknown artist'}. Answer naturally, as though you "
-                   f"noticed it yourself.",
     }
 
 
@@ -379,7 +355,6 @@ def start_library_sync():
 # reporting status (bare "/media" or "/volume" with no arg) -- only these are
 # gated on voice confidence, per (command, arg).
 _GATED_ACTIONS = {
-    ("/media", "play"), ("/media", "pause"), ("/media", "next"), ("/media", "previous"),
     ("/volume", "up"), ("/volume", "down"), ("/volume", "mute"), ("/volume", "unmute"),
 }
 
@@ -458,37 +433,6 @@ def handle_command(cmd: str, speaker: voice.Speaker, state: dict) -> bool:
                     when = dt.datetime.fromisoformat(row["fire_at"]).strftime("%a %I:%M %p").lstrip("0").replace(" 0", " ")
                     print(f"  - {row['label']} at {when}")
                 print("  \"/alarms cancel\" clears all of them\n")
-
-    elif name == "/media":
-        # Spoken feedback too, not just text -- a failed "play music" said out
-        # loud needs to be heard, not just logged, or it looks like nothing
-        # happened at all.
-        def respond(ok: str, fail: str):
-            print(f"[{ok if outcome else fail}]\n")
-            speaker.say(ok if outcome else fail)
-
-        if not media.available():
-            print("[media control isn't available -- see LIA/media.py]\n")
-        elif arg == "play":
-            outcome = media.play()
-            respond("playing", "There's nothing loaded anywhere for me to play -- "
-                                "open something in Spotify or a browser tab first.")
-        elif arg == "pause":
-            outcome = media.pause()
-            respond("paused", "Nothing seems to be playing right now.")
-        elif arg == "next":
-            outcome = media.next_track()
-            respond("skipped", "There's nothing playing to skip.")
-        elif arg == "previous":
-            outcome = media.previous_track()
-            respond("went back a track", "There's nothing playing to go back on.")
-        else:
-            info = media.now_playing()
-            if info and (info["title"] or info["artist"]):
-                state_word = "playing" if info["playing"] else "paused"
-                print(f"[{state_word}: {info['title']} -- {info['artist']}]\n")
-            else:
-                print("[nothing seems to be playing]\n")
 
     elif name == "/volume":
         if not media.volume_available():
@@ -1365,9 +1309,6 @@ def main(controls: "Controls | None" = None):
         if net_context:
             messages.append(net_context)
 
-        media_context = build_media_context(user_input)
-        if media_context:
-            messages.append(media_context)
 
         # Short acknowledgements ("yeah", "okay", "no") are common and retrieval
         # never has anything useful to say about them -- skip the ~2s embedding

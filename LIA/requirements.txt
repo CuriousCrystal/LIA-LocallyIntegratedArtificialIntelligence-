@@ -20,8 +20,7 @@ pysilero-vad>=3.0     # voice activity detection for the open mic (onnx, no torc
 pystray>=0.19         # system tray icon
 Pillow>=10.0          # draws the tray icon
 
-# --- media control (optional) ---
-winsdk>=1.0            # Windows System Media Transport Controls -- play/pause/skip
+# --- system volume (optional) ---
 pycaw>=20240210        # direct system volume control (Core Audio API)
 
 # --- speaker recognition (optional) ---

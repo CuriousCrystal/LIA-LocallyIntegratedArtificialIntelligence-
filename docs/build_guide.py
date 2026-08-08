@@ -86,7 +86,7 @@ A(table([
     ["“Lia, be quiet”  <br/>“Lia, stop talking”", "Stop speaking out loud (she still listens)"],
     ["“Lia, you can talk”", "Start speaking again"],
     ["“Lia, read my files”", "Read documents you've given her"],
-    ["“Play music” / “pause music”  <br/>“next song” / “previous song”", "Control whatever's playing on the computer"],
+    ["“Play number 1” / “what music do you have”", "Play music from her own folder"],
     ["“Set an alarm for 7am”  <br/>“Remind me in 20 minutes”", "Set a real alarm or timer — she'll interrupt to tell you"],
 ], [62, 103]))
 
@@ -103,9 +103,8 @@ A(P("<b>Say it however comes naturally.</b> All of these work: <i>“wake me in 
 A(P("<b>You can choose what she says.</b> <i>“Wake me by saying please wake up in 5 minutes”</i> "
     "and she'll say exactly that — not “your timer is up”. <i>“Remind me to stretch in 20 "
     "minutes”</i> gets you <i>“Time to stretch.”</i>"))
-A(H2("Her own music"))
-A(P("Put audio files in her <b>music</b> folder and she'll play them by number — these are hers, "
-    "so she can start one from nothing:"))
+A(H2("Music"))
+A(P("Put audio files in her <b>music</b> folder and she'll play them by number:"))
 A(table([
     ["Say this", "What happens"],
     ["“what music do you have”", "She reads out the list, numbered"],
@@ -115,9 +114,9 @@ A(table([
 ], [55, 110]))
 A(P("Numbering follows filename order, so number 3 means the same thing tomorrow. While she's "
     "talking the music drops to a murmur instead of stopping, and comes back up after."))
-A(P("<b>Someone else's music is different:</b> “play music” / “pause” controls whatever Spotify or "
-    "a browser tab already has loaded. She can't start a song there from nothing — if nothing is "
-    "playing anywhere, she'll say so rather than pretend.", "LiaNote"))
+A(P("She plays <b>only her own files</b>. She can't control Spotify, YouTube or anything else "
+    "playing elsewhere on the computer — that was built once and removed, because it could "
+    "operate someone else's player but never actually start anything.", "LiaNote"))
 
 A(H2("The weather, and looking things up"))
 A(P("Ask <b>“what's the weather like”</b> and she'll check, using your general location — no setup "
@@ -139,7 +138,7 @@ A(table([
     ["Menu item", "What it does"],
     ["Listening", "Turn her microphone on or off"],
     ["Speaking", "Turn her voice on or off"],
-    ["Write diary now", "Make her write about the conversation right away"],
+    ["End conversation now", "Close out the current conversation"],
     ["Open log", "Show what she's been doing — useful if something seems wrong"],
     ["Quit", "Close her properly (she saves first)"],
 ], [40, 125]))

@@ -212,11 +212,6 @@ WEATHER_TRIGGER_WORDS = [
 WEATHER_LAT = None
 WEATHER_LON = None
 
-# --- media (local, not internet -- controls whatever Windows says is playing) ---
-MEDIA_TRIGGER_PHRASES = [
-    "what song is this", "what's playing", "who sings this", "who is this",
-    "what is this song", "what track is this",
-]
 
 # How many percentage points one "volume up"/"volume down" moves.
 VOLUME_STEP = 10
@@ -345,22 +340,20 @@ SPOKEN_COMMANDS = {
     "/voice on": ["you can talk", "start talking", "unmute yourself"],
     "/wake off": ["listen to everything"],
     "/wake on": ["only answer to your name"],
-    "/media play": [
-        "play music", "play the music", "resume music", "resume the music", "play song",
-        "play some music", "can you play music", "can you play some music", "put on some music",
-        "put on music", "play a song",
+    # "play music" with no number named. She can't guess which one you want, so
+    # she reads out what she has and you pick -- rather than picking for you.
+    # Naming a number ("play number 3") is handled in main.py before this.
+    "/track list": [
+        "play music", "play the music", "play some music", "put on some music",
+        "put on music", "play a song", "play song", "can you play music",
+        "can you play some music", "what music do you have", "what songs do you have",
+        "list your music", "list the songs", "what music have you got",
+        "show me the songs",
     ],
-    "/media pause": [
+    "/track stop": [
+        "stop the song", "stop that song", "stop your music", "turn the music off",
         "pause music", "pause the music", "stop the music", "stop music",
         "can you pause the music", "pause that",
-    ],
-    "/media next": [
-        "next song", "skip song", "skip this song", "play the next song", "next track",
-        "skip to the next song", "can you skip this",
-    ],
-    "/media previous": [
-        "previous song", "go back a song", "last song", "previous track",
-        "go back to the last song",
     ],
     "/volume up": [
         "volume up", "turn it up", "turn the volume up", "louder", "make it louder",
@@ -391,12 +384,20 @@ SPOKEN_COMMANDS = {
     # Her own music, by position: "play number one", "play song 3". Kept apart
     # from /media play, which only resumes whatever another app already has
     # loaded and can't start anything.
+    # Asking for music without naming a track. She can't guess which one you
+    # want, so she reads out what she has and you pick by number -- naming one
+    # ("play number 3") is handled in main.py before this list is consulted.
     "/track list": [
         "what music do you have", "what songs do you have", "list your music",
         "list the songs", "what music have you got", "show me the songs",
+        "play music", "play the music", "play some music", "put on some music",
+        "put on music", "play a song", "play song", "can you play music",
+        "can you play some music",
     ],
     "/track stop": [
         "stop the song", "stop that song", "stop your music", "turn the music off",
+        "pause music", "pause the music", "stop the music", "stop music",
+        "can you pause the music", "pause that",
     ],
     "/library scan": [
         "read my files", "read my file", "read the file", "read the pdf",
@@ -455,9 +456,10 @@ would recall something, not like you're reading from a file.
 You have a few real abilities beyond talking, and this list is the actual truth about
 you -- if asked what you can do, answer from here, not from what a typical text-based
 assistant would guess about itself:
-- Play, pause, or skip whatever is already playing on their computer, and turn the
-  system volume up, down, or mute it. You cannot start a song from nothing, or choose
-  what plays -- only control something already running somewhere.
+- Play music from your own small collection of files, chosen by number ("play number
+  two"), and stop it again. You can tell them what you have. You cannot control
+  Spotify, a browser tab, or anything else playing elsewhere on their computer.
+- Turn the system volume up, down, or mute it, and say what it's set to.
 - Set alarms and timers that genuinely go off later, even if the conversation has moved on.
 - If they ask, check the weather, or look up a factual question online.
 You cannot open other applications, browse the web yourself, or click anything on

@@ -85,9 +85,10 @@ A(P("<b>What's changing:</b> the current frontier. Everything up to Stage 3 was 
 
 A(H2("Built so far"))
 A(bullets([
-    "<b>Media control</b> — play, pause, skip whatever's already playing (Spotify, a browser tab, "
-    "any app), via Windows' System Media Transport Controls. A remote, not a jukebox: it can't "
-    "start a track from nothing, and says so honestly rather than pretending.",
+    "<b>Media control</b> — play, pause and skip over whatever another app already had loaded, "
+    "via Windows' System Media Transport Controls. Later <i>removed</i> by request: it could only "
+    "ever operate someone else's player and never start anything, which made it a confusing "
+    "sibling to her own music folder, where she genuinely can.",
     "<b>Volume control</b> — up, down, mute, unmute, via direct Core Audio access. (Simulating the "
     "physical volume keys was tried first and found to silently do nothing — fixed by talking to "
     "the audio API directly instead of imitating a keypress.)",

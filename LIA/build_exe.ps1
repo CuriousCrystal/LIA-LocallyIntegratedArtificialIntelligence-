@@ -37,7 +37,6 @@ $pyinstaller = @(
     '--collect-all', 'ctranslate2',
     '--collect-all', 'sounddevice',
     '--collect-all', 'soundfile',
-    '--collect-all', 'winsdk',          # Windows media control (SMTC)
     '--collect-all', 'pycaw',           # system volume control (Core Audio)
     '--collect-all', 'sherpa_onnx',     # speaker recognition
     '--hidden-import', 'pystray._win32',
