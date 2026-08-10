@@ -11,9 +11,11 @@
 #
 # The .onnx voices were never affected: protobuf has a NUL early enough for the
 # heuristic to catch it. Marked anyway rather than relying on that.
+# Order matters here: for any given attribute the LAST matching pattern wins, so
+# the catch-all has to come first. With "* text=auto" underneath these it set
+# text back to auto for PDFs too, quietly undoing the whole point of the file.
+* text=auto
+
 *.pdf   binary
 *.onnx  binary
 *.db    binary
-
-# Everything else can be normalised to LF in the repository as usual.
-* text=auto
