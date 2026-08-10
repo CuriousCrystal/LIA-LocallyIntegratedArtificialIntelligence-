@@ -71,6 +71,9 @@ from config import (
     RELEASE_MODELS_WHEN_IDLE,
     PREWARM_ON_SPEECH,
     RETRIEVAL_MIN_WORDS,
+    REMEMBER_CONVERSATION,
+    INTERNET_ENABLED,
+    WEATHER_ENABLED,
     WEATHER_TRIGGER_WORDS,
     INTERNET_TRIGGER_PHRASES,
     VOLUME_STEP,
@@ -227,9 +230,15 @@ def build_internet_context(user_input: str) -> dict | None:
     she's told plainly where it came from and not to pretend it's her own
     knowledge or something you told her.
     """
+    # Fully offline: weather words and "look that up" are ordinary conversation
+    # again, not a request she reaches out for. Returning None rather than a
+    # "no connection" note on purpose -- there is no connection to be missing.
+    if not INTERNET_ENABLED:
+        return None
+
     lowered = user_input.lower()
 
-    if any(w in lowered for w in WEATHER_TRIGGER_WORDS):
+    if WEATHER_ENABLED and any(w in lowered for w in WEATHER_TRIGGER_WORDS):
         if not internet.is_online():
             return {
                 "role": "system",
@@ -1313,7 +1322,13 @@ def main(controls: "Controls | None" = None):
         # Short acknowledgements ("yeah", "okay", "no") are common and retrieval
         # never has anything useful to say about them -- skip the ~2s embedding
         # call entirely rather than spend it for nothing.
-        if len(user_input.split()) >= RETRIEVAL_MIN_WORDS:
+        #
+        # The same reasoning now covers a second empty case. With the
+        # conversation no longer stored, that embedding exists only to search
+        # the library -- so with nothing in the library either, there is
+        # nothing for it to search and every turn was paying for it anyway.
+        if (len(user_input.split()) >= RETRIEVAL_MIN_WORDS
+                and (REMEMBER_CONVERSATION or db.document_titles())):
             status("remembering")
             # Embedded once and reused for both searches -- these used to each
             # embed the same sentence separately, paying for it twice a turn.
@@ -1322,9 +1337,14 @@ def main(controls: "Controls | None" = None):
             except requests.RequestException:
                 query_vec = None
 
-            mem_context = build_memory_context(user_input, query_vec=query_vec)
-            if mem_context:
-                messages.append(mem_context)
+            # Skipped entirely when she isn't keeping the conversation: the old
+            # turns already in the database would otherwise keep surfacing long
+            # after she stopped adding to them, which is the confusion this was
+            # turned off to end.
+            if REMEMBER_CONVERSATION:
+                mem_context = build_memory_context(user_input, query_vec=query_vec)
+                if mem_context:
+                    messages.append(mem_context)
 
             status("checking her reading")
             lib_context = build_library_context(user_input, query_vec=query_vec)
@@ -1378,7 +1398,7 @@ def main(controls: "Controls | None" = None):
         session.add("user", user_input)
         session.add("assistant", reply)
 
-        if not NO_SAVE:
+        if not NO_SAVE and REMEMBER_CONVERSATION:
             status("saving")
             memory.remember_turn(session.id, "user", user_input)
             memory.remember_turn(session.id, "assistant", reply)

@@ -156,12 +156,16 @@ MIC_SETTLE_SECONDS = 0.4
 # name silently reverts it.
 PROTECTED_FACTS = {"name", "preferred_address"}
 
-# --- internet (the one deliberate exception to fully offline) ---
+# --- internet (off: she is now fully offline) ---
 # Everything above this line works with zero internet connection, by design.
-# This adds one narrow, explicit exception: weather, and a factual question you
-# ask her to look up. Ordinary conversation never touches it and never leaves
-# the machine -- see internet.py for exactly what does and doesn't.
-INTERNET_ENABLED = True
+# This was the one narrow exception -- weather, and a factual question you ask
+# her to look up. Both are off now, so nothing she does touches the network
+# except talking to Ollama on this machine.
+#
+# The keys and the code below are left in place rather than deleted: internet.py
+# imports them, and turning this back to True restores both features exactly as
+# they were. Set a key too if you want lookups as well as weather.
+INTERNET_ENABLED = False
 
 # Read from the environment, never hardcoded here -- get a free key at
 # https://console.groq.com. With no key set, "look that up" just tells you
@@ -199,6 +203,13 @@ INTERNET_TRIGGER_PHRASES = [
     # no way to watch or listen to an actual video.
     "youtube",
 ]
+
+# Off: asking about the weather is just conversation again, and she says plainly
+# that she can't check rather than reaching for a service. Turned off because it
+# wasn't wanted, not because it was broken -- set this back to True and the
+# whole path below works again, no other change needed. SYSTEM_PROMPT has to
+# agree with whatever this says, or she'll offer something she won't do.
+WEATHER_ENABLED = False
 
 # Weather is answered from a live source directly -- Open-Meteo, no API key
 # needed -- rather than asked of any LLM, local or Groq, which would only guess.
@@ -283,6 +294,22 @@ LIBRARY_MIN_SCORE = 0.45
 GREET_ON_START = False
 
 # --- what she's allowed to remember ---
+# Off: the conversation itself is never written down. Every turn used to be
+# embedded and stored, and later searched by similarity -- so while she never
+# invented facts about you, she could still quote a half-finished thought from
+# three weeks ago back at you because it happened to score well against
+# whatever you just said. That is the "she gets confused" failure, and it grows
+# with the database rather than settling down.
+#
+# With this off, the only thing that survives a session is what you explicitly
+# told her to keep. Storage stops growing: notes are a line of text each,
+# instead of a 768-number vector per turn.
+#
+# The cost, so it isn't a surprise: she can no longer recall anything you said
+# in an earlier session unless you asked her to remember it. Within a single
+# conversation she still has the last SHORT_TERM_TURNS turns as usual.
+REMEMBER_CONVERSATION = False
+
 # Off: she never decides for herself what's worth keeping about you. She
 # remembers when you say "remember that ...", and not otherwise.
 #
@@ -461,10 +488,11 @@ assistant would guess about itself:
   Spotify, a browser tab, or anything else playing elsewhere on their computer.
 - Turn the system volume up, down, or mute it, and say what it's set to.
 - Set alarms and timers that genuinely go off later, even if the conversation has moved on.
-- If they ask, check the weather, or look up a factual question online.
-You cannot open other applications, browse the web yourself, or click anything on
-their screen. Never say you're "just text-based" -- you're not; say plainly which of
-the above you can or can't do instead.
+- Remember something when they ask you to: "remember that ...".
+You have no internet access at all. You cannot check the weather, look anything up
+online, open other applications, or click anything on their screen. Never say you're
+"just text-based" -- you're not; say plainly which of the above you can or can't do
+instead.
 """
 
 # Used when generating a diary entry at the end of a session.
