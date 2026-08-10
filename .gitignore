@@ -19,6 +19,21 @@ __pycache__/
 # Downloadable models -- large binaries, re-fetched via LIA/models/README.md
 # and LIA/voices/README.md rather than committed.
 LIA/models/*.onnx
+# The voice files were named in the comment above but never actually matched,
+# so the three Piper voices (~60MB each) went in with the first commit and are
+# in the history already -- this rule cannot pull them back out, it only stops
+# the next one being added. GitHub warns at 50MB and refuses at 100MB, so a
+# fourth voice is worth not committing. The .json beside each one is small and
+# stays either way.
+LIA/voices/*.onnx
+
+# Anything you've handed her. Documents you drop in the library are yours (and
+# often someone else's copyright); music likewise. Only the READMEs explaining
+# what the folders are for belong in the repo.
+LIA/library/*
+!LIA/library/README.md
+LIA/music/*
+!LIA/music/README.md
 
 # API keys, if you ever put one in a file instead of an environment variable.
 .env
