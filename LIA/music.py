@@ -11,6 +11,12 @@ mid-way. Decoded on a background thread and pushed out in blocks rather than
 loaded whole: a five-minute song is around 50MB once decoded to raw samples,
 and the pause before playback while that happened was audible.
 
+Two decoders, tried in that order. libsndfile (via soundfile) handles
+everything here except AAC -- it has no decoder for it, so an .m4a would be
+listed as a numbered track and then refuse to open, which is worse than not
+offering it. PyAV covers that gap and arrives with faster-whisper anyway, so
+it costs nothing to fall back to.
+
 She never plays over herself -- speaking ducks the music rather than talking
 into it, since two voices at once is worse than either.
 """
@@ -112,6 +118,57 @@ def duck(quieter: bool):
     _ducked = quieter
 
 
+def _read_soundfile(path: Path):
+    """(sample rate, channels, blocks) via libsndfile. Raises if it can't open."""
+    import soundfile as sf
+
+    audio = sf.SoundFile(str(path))
+
+    def blocks():
+        with audio:
+            while True:
+                block = audio.read(_BLOCK, dtype="float32")
+                if not len(block):
+                    return
+                yield block.reshape(-1, 1) if block.ndim == 1 else block
+
+    return audio.samplerate, audio.channels, blocks()
+
+
+def _read_av(path: Path):
+    """Same, via PyAV -- the fallback for what libsndfile won't open (.m4a)."""
+    import av
+
+    container = av.open(str(path))
+    stream = container.streams.audio[0]
+    # Anything multi-channel is folded to stereo rather than passed through:
+    # 5.1 out of a laptop speaker gains nothing and needs a matching device.
+    channels = 2 if stream.channels > 1 else 1
+    rate = stream.rate
+    # "flt" is packed float32, which is what sounddevice wants -- the planar
+    # default would come back as separate per-channel arrays instead.
+    resampler = av.audio.resampler.AudioResampler(
+        format="flt", layout="stereo" if channels == 2 else "mono", rate=rate)
+
+    def blocks():
+        with container:
+            for frame in container.decode(audio=0):
+                for chunk in resampler.resample(frame):
+                    yield chunk.to_ndarray().reshape(-1, channels)
+
+    return rate, channels, blocks()
+
+
+def _open(path: Path):
+    """Whichever decoder can read this file, or None if neither can."""
+    for reader in (_read_soundfile, _read_av):
+        try:
+            return reader(path)
+        except Exception:
+            continue
+    return None
+
+
 def play(path: Path) -> bool:
     """Start a track, replacing whatever was playing. False if it won't open."""
     global _thread, _current
@@ -119,12 +176,12 @@ def play(path: Path) -> bool:
     if not available() or not path.exists():
         return False
 
-    import soundfile as sf
-
-    try:
-        sf.SoundFile(str(path)).close()  # fail fast on an unreadable file
-    except Exception:
+    # Opened before anything is stopped, so a file that turns out to be
+    # unreadable leaves the current track playing rather than killing it.
+    opened = _open(path)
+    if opened is None:
         return False
+    rate, channels, blocks = opened
 
     stop()
     _stop.clear()
@@ -132,24 +189,20 @@ def play(path: Path) -> bool:
 
     def run():
         import sounddevice as sd
-        import soundfile as sf
 
         try:
-            with sf.SoundFile(str(path)) as audio:
-                with sd.OutputStream(samplerate=audio.samplerate,
-                                     channels=audio.channels,
-                                     dtype="float32") as out:
-                    while not _stop.is_set():
-                        block = audio.read(_BLOCK, dtype="float32")
-                        if not len(block):
-                            break
-                        if block.ndim == 1:
-                            block = block.reshape(-1, 1)
-                        if _ducked:
-                            block = block * MUSIC_DUCK_VOLUME
-                        out.write(np.ascontiguousarray(block))
+            with sd.OutputStream(samplerate=rate, channels=channels,
+                                 dtype="float32") as out:
+                for block in blocks:
+                    if _stop.is_set():
+                        break
+                    if _ducked:
+                        block = block * MUSIC_DUCK_VOLUME
+                    out.write(np.ascontiguousarray(block))
         except Exception:
             pass  # a device that disappears mid-song shouldn't take her down
+        finally:
+            blocks.close()  # stopping early still releases the file
 
     with _lock:
         _thread = threading.Thread(target=run, daemon=True)
