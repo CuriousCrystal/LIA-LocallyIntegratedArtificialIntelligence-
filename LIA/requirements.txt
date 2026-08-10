@@ -12,6 +12,12 @@ piper-tts>=1.6        # local neural TTS, uses the voice files in voices/
 pyttsx3>=2.98         # fallback to the built-in Windows voice
 sounddevice>=0.5      # audio playback + microphone capture
 
+# --- her own music (files in music/, played by number) ---
+soundfile>=0.12        # decodes .mp3/.wav/.flac/.ogg/.aiff for music.py
+av>=11.0               # the .m4a/AAC fallback libsndfile has no decoder for.
+                       # Arrives with faster-whisper anyway; listed because
+                       # music.py imports it directly, not by accident.
+
 # --- voice: listening (optional, only needed with LISTEN_ENABLED) ---
 faster-whisper>=1.1   # speech recognition, runs on CPU to leave the GPU to Ollama
 pysilero-vad>=3.0     # voice activity detection for the open mic (onnx, no torch)
@@ -27,5 +33,8 @@ pycaw>=20240210        # direct system volume control (Core Audio API)
 # Needs a model file too -- see LIA/models/README.md
 sherpa-onnx>=1.13       # local speaker-embedding extraction (onnx, no torch, ~27MB)
 
-# --- internet (optional, off by default until GROQ_API_KEY is set) ---
+# --- internet (off: INTERNET_ENABLED = False, she is fully offline) ---
 # no extra package -- internet.py uses requests, already listed above
+
+# --- docs (only needed to rebuild the PDFs in docs/) ---
+# reportlab>=4.0       # pip install it separately; she never imports it
