@@ -53,13 +53,28 @@ _WORD_NUMBERS = {
 }
 
 # Phrases that mean a duration but contain no number at all.
+#
+# Each swallows the preposition in front of it, because the replacement supplies
+# its own. Without that, "remind me to take my tablets in half an hour" became
+# "...tablets in in 30 minutes"; _RELATIVE consumed the second "in", the first
+# survived into the remainder, and she said "Time to take my tablets in."
+#
+# Absorbed here rather than stripped from the tail afterwards, so a request that
+# genuinely ends in a preposition still survives -- "remind me to log in in five
+# minutes" contains no duration phrase, is left alone, and stays "log in".
+_PREPOSITION = r"(?:(?:in|after|for|within)\s+)?"
+# Longest first, and it has to stay that way: "an hour and a half", "quarter of
+# an hour" and "half an hour" all contain "an hour", so a plain "an hour" rule
+# sitting above them claims the tail of each. That put "quarter of an hour"
+# through the wrong rule entirely -- a fifteen minute reminder was set for an
+# hour, and she announced it as "Time to leave in quarter of."
 _DURATION_PHRASES = [
-    (re.compile(r"\bhalf an hour\b", re.I), "in 30 minutes"),
-    (re.compile(r"\ban hour and a half\b", re.I), "in 90 minutes"),
-    (re.compile(r"\b(?:an|one) hour\b", re.I), "in 60 minutes"),
-    (re.compile(r"\bquarter of an hour\b", re.I), "in 15 minutes"),
-    (re.compile(r"\ba couple(?: of)? (minutes|mins)\b", re.I), "in 2 minutes"),
-    (re.compile(r"\ba few (minutes|mins)\b", re.I), "in 3 minutes"),
+    (re.compile(rf"\b{_PREPOSITION}an hour and a half\b", re.I), "in 90 minutes"),
+    (re.compile(rf"\b{_PREPOSITION}quarter of an hour\b", re.I), "in 15 minutes"),
+    (re.compile(rf"\b{_PREPOSITION}half an hour\b", re.I), "in 30 minutes"),
+    (re.compile(rf"\b{_PREPOSITION}(?:an|one) hour\b", re.I), "in 60 minutes"),
+    (re.compile(rf"\b{_PREPOSITION}a couple(?: of)? (?:minutes|mins)\b", re.I), "in 2 minutes"),
+    (re.compile(rf"\b{_PREPOSITION}a few (?:minutes|mins)\b", re.I), "in 3 minutes"),
 ]
 
 
