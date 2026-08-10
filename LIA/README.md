@@ -1,10 +1,10 @@
 # LIA — Locally Integrated Artificial Intelligence
 
-A companion that runs entirely on your machine. No accounts, and nothing leaves
-the laptop once the models are pulled — with one deliberate, narrow exception:
-if you give her an API key, she can check the weather and look things up
-online. See [Weather, lookups and music](#weather-lookups-and-music). Leave
-those keys unset and she never touches the internet at all.
+A companion that runs entirely on your machine. No accounts, no API keys, no
+network. Once the models are pulled, nothing she does leaves the laptop.
+
+Weather and online lookups were built, and are switched off rather than deleted
+— see [Offline, completely](#offline-completely).
 
 ## Setup
 
@@ -176,43 +176,29 @@ things yourself if you want them converted.
 `.docx` is Word's current format only — not the old binary `.doc`, and not
 Kindle's `.mobi`/`.azw`. Converting those to `.epub` or `.docx` first works.
 
-## Weather, lookups and music
+## Offline, completely
 
-The one deliberate exception to running fully offline — narrow on purpose, and
-entirely optional. With no keys set, none of this activates and she never
-makes a network call beyond talking to Ollama on your own machine.
+`INTERNET_ENABLED = False`. She makes no network call at all beyond talking to
+Ollama on your own machine.
 
-**Weather** needs no key at all. Say *"what's the weather like"* and she checks
-a live source (Open-Meteo) and answers in her own voice, geolocated from your
-IP automatically.
+Two things used to reach out, and both are switched off rather than deleted:
 
-**"Look that up"** answers a factual question from the internet instead of
-guessing from what a 3B local model already knows. Needs one of:
+- **Weather** — needed no key. Open-Meteo, geolocated from your IP, answered in
+  her own voice. `WEATHER_ENABLED = True` and `INTERNET_ENABLED = True` bring it
+  back.
+- **"Look that up"** — needed a Groq or OpenRouter key, read from the
+  environment and never pasted into a file. With OpenRouter and
+  `OPENROUTER_ONLINE`, it ran a real web search rather than asking a bigger
+  model to guess.
 
-```powershell
-[Environment]::SetEnvironmentVariable('GROQ_API_KEY', 'your-key', 'User')
-[Environment]::SetEnvironmentVariable('OPENROUTER_API_KEY', 'your-key', 'User')
-```
+`internet.py` still holds all of it, unchanged. One caveat if you turn it back
+on, found by testing: `is_online()` probes `https://1.1.1.1`, and some ISPs
+hijack that address with a self-signed certificate — which makes her believe
+she's offline when she isn't, and decline both features.
 
-Set as environment variables, never pasted into a file — `config.py` only ever
-reads them via `os.environ.get(...)`. Restart her after setting one so the new
-process picks it up.
+## Music
 
-If both are set, **OpenRouter is tried first**, because with
-`OPENROUTER_ONLINE = True` (the default) it appends `:online` to the model
-name, which makes OpenRouter run an actual web search before answering — a
-real current answer, not a fluent guess. Groq is fast but is just a bigger
-version of the same kind of model Lia already runs locally; a plain
-chat-completions call to it has no more access to today's news than she does
-already. It's the fallback, or the option if that's the only key you have.
-
-Naming a source works too — *"search Reddit for..."* or *"what does Reddit think
-about..."* pulls in real, current opinions rather than a guess. One caveat found
-by testing it: search-engine operators like `site:reddit.com` make the
-underlying search decline entirely (it answers as if it has no web access at
-all) — plain natural language is what actually works.
-
-**Music** lives in `LIA\music\` (or `dist\Lia\music\`). Drop audio in and she
+Music lives in `LIA\music\` (or `dist\Lia\music\`). Drop audio in and she
 plays it by number:
 
 ```
@@ -227,6 +213,11 @@ Numbering follows filename order, so number 3 means the same thing tomorrow.
 Playback goes through her own audio — no window opens — and while she speaks
 the music drops to a murmur rather than stopping. `.mp3 .wav .flac .ogg .m4a
 .aiff`. See [`music/README.md`](music/README.md).
+
+Two decoders sit behind that list. libsndfile (via `soundfile`) handles all of
+it except AAC, which it has no decoder for — so `.m4a` was listed as a numbered
+track and then refused to open, which is worse than not offering it. PyAV covers
+that one, and arrives with `faster-whisper` anyway.
 
 She plays **only her own files**. Controlling Spotify or a browser tab through
 Windows' media keys was built and then removed by request: it could operate
@@ -268,28 +259,35 @@ I…"*, *"note that…"* and it's stored, word for word:
 "don't forget my sister is called Anaya"
 ```
 
-Nothing else about you is written down. She doesn't decide for herself what's
-worth keeping, and she doesn't write a diary.
+Nothing else is written down. The conversation itself isn't stored, she doesn't
+decide for herself what's worth keeping, and she doesn't write a diary. Within a
+single conversation she still has the last `SHORT_TERM_TURNS` turns as usual.
 
-That's `AUTO_EXTRACT_FACTS = False` and `DIARY_ENABLED = False` in `config.py`.
-Both used to be on, and both are off for the same reason: **she was inventing
-history that read exactly like real history.** The extractor stored the same
-fact twice under different keys, and the diary once reflected at length on the
-person "moving between unrelated topics" — drawn entirely from a list of test
-commands. Once that's in the database it colours every later reply, and there's
-nothing marking it as a guess. Turn either back on if you'd rather have it.
+That's `REMEMBER_CONVERSATION = False`, `AUTO_EXTRACT_FACTS = False` and
+`DIARY_ENABLED = False` in `config.py`. All three used to be on, and all three
+are off for the same reason: **she was inventing history that read exactly like
+real history.**
+
+- The **extractor** stored the same fact twice under different keys.
+- The **diary** once reflected at length on the person "moving between unrelated
+  topics" — drawn entirely from a list of test commands.
+- **Stored turns** meant a half-finished thought from three weeks ago could
+  resurface because it scored well against whatever you just said. She never
+  invented the quote, but pulling it into a conversation it had nothing to do
+  with reads the same way from the outside — and unlike the other two, this one
+  gets worse as the database grows.
+
+Once any of that is in the database it colours every later reply, and there's
+nothing marking it as a guess. Turn any of them back on if you'd rather have it.
 
 Telling her the same thing twice doesn't store it twice — she says she already
 has it.
 
-What's still in `lia_memory.db` (plain SQLite — inspect it any time with
-`sqlite3 lia_memory.db`):
-
-- **facts** — your name, plus the notes you explicitly asked her to keep
-- **memories** — every turn, embedded, searched by cosine similarity. Only
-  *your* turns are retrieved; hers competing for the same slots made her quote
-  her own speculation back as fact. A relevance floor (`MEMORY_MIN_SCORE`)
-  drops weak matches rather than forcing in the closest thing available.
+What's left in `lia_memory.db` (plain SQLite — inspect it any time with
+`sqlite3 lia_memory.db`) is **facts**: your name, plus the notes you explicitly
+asked her to keep. The `memories` table still exists and is no longer read or
+written; `MEMORY_TOP_K` and `MEMORY_MIN_SCORE` only matter if you switch
+`REMEMBER_CONVERSATION` back on.
 
 A conversation ends when you say `bye`, or on its own after `IDLE_MINUTES` of
 silence.
@@ -311,13 +309,13 @@ wrote about you.
 | `config.py` | every prompt and tunable. **Edit this first** if her tone feels off. |
 | `db.py` | SQLite schema and queries |
 | `llm.py` | Ollama wrapper — chat, streaming chat, embeddings |
-| `memory.py` | embedding, retrieval, fact extraction and sanitising |
-| `diary.py` | end-of-session reflection |
+| `memory.py` | embedding, retrieval, fact extraction and sanitising — dormant while `REMEMBER_CONVERSATION` is off |
+| `diary.py` | end-of-session reflection — switched off |
 | `voice.py` | text-to-speech, speech recognition, voice activity detection |
 | `main.py` | the conversation loop |
 | `app.py` | tray app wrapper for running her in the background |
 | `library.py` | reads PDFs and notes you drop in `library/` |
-| `internet.py` | the one deliberate offline exception — weather, and online lookups |
+| `internet.py` | weather and online lookups — switched off, she is fully offline |
 | `media.py` | system volume (Core Audio) |
 | `alarms.py` | spoken alarms and timers — regex-parsed, never guessed by the model |
 | `music.py` | her own music — files in `music/`, played by number |
@@ -340,12 +338,14 @@ wrote about you.
 | `WHISPER_MODEL` | `small.en` gets names right that `base.en` garbles |
 | `IDLE_MINUTES` | how long a silence ends the conversation |
 | `VOICE_ENGINE` | `"piper"` (default) / `"system"` for the built-in Windows voice |
-| `RETRIEVAL_MIN_WORDS` | skips memory/library lookup below this many words — raise it if short replies still feel slow |
-| `OPENROUTER_ONLINE` | live web search on "look that up", instead of a guess — see `internet.py` |
+| `RETRIEVAL_MIN_WORDS` | skips library lookup below this many words — raise it if short replies still feel slow |
+| `REMEMBER_CONVERSATION` | on: she stores and searches every turn again. Off by default — see [How she remembers](#how-she-remembers) |
+| `INTERNET_ENABLED` | on: weather and "look that up" come back — see [Offline, completely](#offline-completely) |
 
 ## Not built yet
 
 - Merging duplicate facts (`sister_name` and `visiting_sister_name` both exist)
-- Any way to make her forget something
+- Any way to make her forget a single note
+- OCR, so scanned PDFs stay unreadable
 - Voice cloning from a short recording — see [`voices/README.md`](voices/README.md#cloning-a-specific-persons-voice)
 - Music playback control on anything but Windows

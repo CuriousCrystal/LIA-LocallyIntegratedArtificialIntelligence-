@@ -18,10 +18,18 @@ from reportlab.platypus import KeepTogether, Paragraph, Spacer, Table, TableStyl
 from make_pdfs import ACCENT, CODE_BG, INK, MUTED, RULE, S, build
 
 HERE = Path(__file__).parent
-SESSION = Path(
-    r"C:/Users/saart/.claude/projects/d--Visuals-AI"
-    r"/ca0a2e3f-a2a4-45b0-9f00-0c3be7db4c08.jsonl"
-)
+
+# The build session this document and the Session Summary are made from was
+# written under a different Windows account, which was lost when the laptop was
+# reformatted in August 2026. Both PDFs are therefore frozen: the copies
+# committed in this folder are the only surviving record of that conversation.
+#
+# Deliberately still a single named file rather than "whatever session log is
+# present". Globbing the folder would find some other, unrelated conversation
+# and cheerfully rebuild the transcript from it, overwriting the real one with
+# something that only looks right. Failing loudly is the correct behaviour here.
+SESSION = (Path.home() / ".claude" / "projects" / "d--Visuals-AI"
+           / "ca0a2e3f-a2a4-45b0-9f00-0c3be7db4c08.jsonl")
 
 USER_BG = colors.HexColor("#eef1f6")
 

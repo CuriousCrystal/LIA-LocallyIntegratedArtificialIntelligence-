@@ -233,6 +233,57 @@ A(callout("<b>Worth noticing about the diagnosis:</b> neither complaint describe
           "stored memories took a minute and pointed straight at it; reasoning about the "
           "symptoms would not have."))
 
+A(H2("Rebuilt from nothing, then deliberately narrowed"))
+A(P("The laptop was reformatted. The project files survived on a second drive, but the machine "
+    "underneath them didn't — no Python, no Ollama, not even git. Standing her back up from a bare "
+    "Windows install turned out to be the most honest test the setup instructions have had, because "
+    "nothing was already installed to paper over a gap."))
+A(P("<b>Two gaps showed up immediately</b>, both invisible on a machine that already worked:"))
+A(bullets([
+    "<font face='Courier'>soundfile</font> was missing from the requirements file entirely, though "
+    "<font face='Courier'>music.py</font> imports it. Anyone following the README got a Lia whose "
+    "music failed the first time it was asked for.",
+    "<font face='Courier'>.m4a</font> was advertised in three places — the code, and both READMEs — "
+    "but libsndfile has no AAC decoder. She would list an m4a as a numbered track and then refuse "
+    "to open it. Offering something and then declining it is worse than never offering it, so PyAV "
+    "went in behind libsndfile as a fallback rather than the format being dropped.",
+]))
+A(P("<b>An alarm bug hid behind a cosmetic one.</b> “Remind me to take my tablets in half an hour” "
+    "produced “Time to take my tablets in.” — a dangling preposition, and the sort of thing that "
+    "looks like a wording nit. Chasing it found that the duration rules were checked shortest-first, "
+    "so the general “an hour” rule matched inside “quarter of an hour” before the specific rule ran. "
+    "<b>A fifteen-minute reminder was being set for sixty minutes</b>, silently, and had been all "
+    "along. The visible flaw was cosmetic; the one underneath it wasn't."))
+A(callout("<b>Worth recording as method:</b> the fix for the wording could have been to strip "
+          "trailing prepositions, which would have made the symptom disappear and left the timing "
+          "bug in place — and broken “remind me to log in in five minutes” into “Time to log.” "
+          "along the way. Fixing the cause instead of the symptom found the real defect and "
+          "protected the edge case. 16 phrasings now verified, including the ones designed to stay "
+          "conversation."))
+A(P("<b>Then she was narrowed on purpose</b>, which is the part worth tracking. Three capabilities "
+    "that worked were switched off because they weren't wanted, not because they were broken:"))
+A(bullets([
+    "<b>Weather</b> — off. It needed no key and answered from live data, but it was the only reason "
+    "she touched the network at all.",
+    "<b>Online lookups</b> — off. Groq and OpenRouter both still wired up, both keyless and idle.",
+    "<b>The stored conversation</b> — off. Every turn used to be embedded and searched later. She "
+    "never invented those quotes, but surfacing a half-finished thought from weeks ago in a "
+    "conversation it had nothing to do with reads the same way from the outside, and unlike the "
+    "diary or the fact extractor, <i>this one got worse as the database grew</i>.",
+]))
+A(P("What's left is a companion that talks, listens, reads what she's given, plays what she's "
+    "given, sets alarms, and keeps exactly the notes she was asked to keep. She now makes no "
+    "network call whatsoever beyond Ollama on the same machine."))
+A(callout("<b>Each of these is a flag, not a deletion.</b> <font face='Courier'>INTERNET_ENABLED</font>, "
+          "<font face='Courier'>WEATHER_ENABLED</font> and <font face='Courier'>REMEMBER_CONVERSATION</font> "
+          "all restore the old behaviour on their own. The code was left intact deliberately: "
+          "“we don't want this now” and “this was a mistake” are different conclusions, and only "
+          "the second one justifies throwing the work away."))
+A(P("One side effect, unplanned and welcome: with nothing stored to search and an empty library, "
+    "the per-turn embedding call had nothing left to do, so it's now skipped entirely. Replies come "
+    "back about two seconds sooner. Removing features made her faster, which is not usually how "
+    "that goes.", "LiaNote"))
+
 A(H2("Not yet built"))
 A(bullets([
     "Opening or closing applications.",

@@ -82,8 +82,9 @@ A(H2("requests"))
 A(P("The standard, simple way to make HTTP calls from Python — GET and POST requests, JSON bodies, "
     "headers, timeouts. Almost every Python project that talks to any web API uses this library; "
     "it's worth knowing well as a baseline skill."))
-A(P("<b>In Lia:</b> every network call in the whole project goes through <font face='Courier'>requests</font> "
-    "— talking to Ollama, fetching weather from Open-Meteo, and the optional Groq/OpenRouter lookups."))
+A(P("<b>In Lia:</b> every network call in the whole project goes through <font face='Courier'>requests</font>. "
+    "With the internet features switched off, the only thing left for it to talk to is Ollama on "
+    "this same machine — the weather and lookup calls are still written, just never made."))
 
 A(PageBreak())
 
@@ -160,6 +161,16 @@ A(P("A Python binding for PortAudio, a cross-platform C library for real-time au
 A(P("<b>In Lia:</b> both directions — recording your voice for the VAD/Whisper pipeline, and "
     "playing back whatever Piper (or the fallback voice) synthesises."))
 
+A(H2("soundfile and PyAV"))
+A(P("An audio <i>file</i> is not audio <i>samples</i>: an mp3 is compressed, and something has to "
+    "turn it back into the raw numbers a sound card can play. soundfile wraps libsndfile, the "
+    "long-standing C library for exactly that; PyAV wraps FFmpeg, which handles far more formats "
+    "but is a much heavier dependency."))
+A(P("<b>In Lia:</b> both, for her music folder, tried in that order. libsndfile covers mp3, wav, "
+    "flac, ogg and aiff, but has no AAC decoder — so an <font face='Courier'>.m4a</font> was listed "
+    "as a numbered track and then refused to open. PyAV covers that one case, and was already "
+    "installed as a faster-whisper dependency, so it cost nothing to fall back to.", "LiaNote"))
+
 A(PageBreak())
 
 # --------------------------------------------------------------------- app ---
@@ -170,7 +181,7 @@ A(P("A small cross-platform library for putting an icon in the system tray (the 
     "clock) with a right-click menu — the minimum needed to have a program live in the background "
     "without a normal window."))
 A(P("<b>In Lia:</b> the orange dot. Filled when listening, hollow when muted, with a menu for "
-    "toggling voice/mic, forcing a diary write, opening the log, and quitting cleanly."))
+    "toggling voice/mic, ending the conversation, opening the log, and quitting cleanly."))
 
 A(H2("Pillow (PIL)"))
 A(P("The standard Python library for opening, creating, and manipulating images — resizing, "
@@ -179,14 +190,22 @@ A(P("The standard Python library for opening, creating, and manipulating images 
 A(P("<b>In Lia:</b> draws the tray icon itself — a small circle, filled or hollow — generated in "
     "code rather than loaded from an image file."))
 
-A(H2("winsdk"))
-A(P("A Python projection of the Windows Runtime (WinRT) APIs — the modern system-level interface "
-    "Windows itself uses for things like notifications, sensors, and media session control. "
-    "“Projection” means the C++/COM interface is exposed as ordinary (if async-heavy) Python "
-    "objects and methods."))
-A(P("<b>In Lia:</b> System Media Transport Controls — the same system behind hardware media keys "
-    "and the taskbar's media flyout — used to play/pause/skip whatever's actually playing, and to "
-    "read its title and artist, without needing to know which app is playing it."))
+A(H2("pycaw"))
+A(P("A Python wrapper over the Windows Core Audio APIs — the COM interfaces Windows itself uses for "
+    "volume, mute state and per-application audio sessions. COM is Windows' older object model, "
+    "which is why this arrives with <font face='Courier'>comtypes</font> in tow."))
+A(P("<b>In Lia:</b> “turn it up”, “mute”, and being able to say what the volume actually is. "
+    "Simulated media-key presses were tried first and verified to do nothing at all — a synthetic "
+    "key needs a focused window to land on, and she hasn't got one. Talking to the audio endpoint "
+    "directly was the only thing that worked.", "LiaNote"))
+
+A(H2("sherpa-onnx"))
+A(P("A speech toolkit that runs recognition, synthesis and speaker-embedding models through ONNX "
+    "Runtime, with no PyTorch anywhere. A speaker embedding is the same idea as a text embedding: a "
+    "voice becomes a vector, and two recordings of the same person land near each other."))
+A(P("<b>In Lia:</b> voice recognition — comparing what she just heard against an enrolled voiceprint "
+    "with cosine similarity, the same maths the library search uses on text. A soft comfort signal, "
+    "not a lock: a mismatch makes her more careful, never refuses to talk."))
 
 A(H2("PyInstaller"))
 A(P("A tool that bundles a Python program, the interpreter itself, and every library it depends on "
@@ -221,6 +240,11 @@ A(P("<b>In Lia:</b> together they let the library folder accept whole novels, no
     "text files — added after a real book (a Harry Potter novel) turned out not to work yet. Each "
     "chapter is treated the same way a PDF page is: extracted, then chunked and embedded on its own."))
 
+A(callout("<b>The three services below are switched off.</b> Lia runs fully offline now — "
+          "<font face='Courier'>INTERNET_ENABLED = False</font>. The code is all still there and "
+          "unchanged, so they're kept here as a study reference and because one flag brings them "
+          "back. Nothing in this section runs as she's currently configured."))
+
 A(H2("Groq"))
 A(P("A company that hosts open language models (like Meta's Llama family, at sizes far bigger than "
     "what fits on a home GPU) on custom chips (LPUs) built specifically for fast inference — its "
@@ -241,17 +265,22 @@ A(P("<b>In Lia:</b> the preferred “look that up” provider when both keys are
 A(H2("Open-Meteo"))
 A(P("A free weather API that needs no signup or key at all — just a latitude/longitude and it "
     "returns current conditions and a forecast as JSON."))
-A(P("<b>In Lia:</b> answers “what's the weather” directly from live data, deliberately without "
+A(P("<b>In Lia:</b> answered “what's the weather” directly from live data, deliberately without "
     "routing it through any language model — there's nothing for a model to usefully add to a "
     "number that's already correct."))
+A(P("Worth knowing if it's ever switched back on: the connectivity check in front of it probes "
+    "<font face='Courier'>https://1.1.1.1</font>, and some ISPs hijack that address with a "
+    "self-signed certificate. The weather call itself works fine; the check in front of it fails, "
+    "and she concludes she's offline when she isn't.", "LiaNote"))
 
 A(H2("ReportLab"))
 A(P("A Python library for generating PDF files programmatically — laying out paragraphs, tables, "
     "and page templates in code rather than a WYSIWYG editor. Lower-level than most people expect: "
     "you build a list of “flowable” objects (paragraphs, tables, spacers) and it handles pagination."))
-A(P("<b>In Lia:</b> what generated this document, and the three others alongside it — "
+A(P("<b>In Lia:</b> what generated this document, and the four others alongside it — "
     "<font face='Courier'>docs/make_pdfs.py</font> holds the shared styling, and a small script per "
-    "document builds the actual content."))
+    "document builds the actual content. It is the one dependency here she never imports herself: "
+    "it builds the docs, it isn't part of her."))
 
 build(HERE / "Lia - Tools We Used.pdf",
       "Lia — Tools We Used",

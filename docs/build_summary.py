@@ -550,6 +550,13 @@ def entry(n, ex):
 
 
 def main():
+    # Same guard as build_transcript.py, and for the same reason: the session
+    # this is built from was lost with the reformatted laptop, so the committed
+    # PDF is the only copy. Say so plainly instead of a FileNotFoundError
+    # traceback, and write nothing.
+    if not SESSION.exists():
+        raise SystemExit(f"session log not found: {SESSION}")
+
     exchanges = group_exchanges(read_session(SESSION))
 
     story = []

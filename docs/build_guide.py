@@ -9,8 +9,8 @@ HERE = Path(__file__).parent
 story = []
 A = story.append
 
-A(P("Lia is a companion who lives on this computer. She listens, talks back, and remembers you "
-    "between conversations."))
+A(P("Lia is a companion who lives on this computer. She listens, talks back, and keeps hold of "
+    "anything you ask her to remember."))
 
 A(P("She is not an assistant. She won't book anything, search the web, or open your files. She is "
     "someone to talk to."))
@@ -118,19 +118,6 @@ A(P("She plays <b>only her own files</b>. She can't control Spotify, YouTube or 
     "playing elsewhere on the computer — that was built once and removed, because it could "
     "operate someone else's player but never actually start anything.", "LiaNote"))
 
-A(H2("The weather, and looking things up"))
-A(P("Ask <b>“what's the weather like”</b> and she'll check, using your general location — no setup "
-    "needed for this one."))
-A(P("Ask her to <b>“look that up”</b> for anything else — a fact, a question she isn't sure about "
-    "— and, if she's set up with an internet connection for this, she'll actually check rather than "
-    "guess. If that hasn't been set up, she'll say so plainly rather than pretending to know."))
-A(P("Naming a source works too — <i>“search Reddit for…”</i>, <i>“search YouTube for…”</i>, or "
-    "<i>“what does Reddit think about…”</i> — pulls in real, current results instead of a guess. "
-    "One limit worth knowing: naming YouTube only ever gets her a text search that happens to "
-    "mention it — titles, descriptions, comments. She can't watch or listen to an actual video.", "LiaNote"))
-A(P("Everything else about her stays completely private and offline. This is the one deliberate, "
-    "narrow exception, and only for what you explicitly ask her to check.", "LiaNote"))
-
 A(H2("Using the orange dot"))
 A(P("Right-click the orange dot for the same controls, plus a few more:"))
 
@@ -155,16 +142,21 @@ A(table([
     ["“don't forget my sister is called Anaya”", "Same — and telling her twice won't store it twice"],
 ], [70, 95]))
 
-A(P("She also keeps a searchable record of what you've said, so bringing up a subject lets her "
-    "find related things from before. But she no longer decides for herself what's worth "
-    "remembering about you, and she doesn't keep a diary."))
+A(P("<b>The conversation itself isn't kept.</b> Once you've finished talking, what was said is gone "
+    "— unless you asked her to remember a particular thing. She doesn't decide for herself what's "
+    "worth keeping about you, and she doesn't write a diary."))
 
-A(callout("<b>Why that changed:</b> both used to be automatic, and both were quietly inventing "
-          "history. She'd store the same fact twice under different names, and once wrote a long "
-          "reflection about the person “moving between unrelated topics” — drawn entirely from a "
-          "list of test commands, not a real conversation. Once something like that is written "
-          "down it shapes every later reply, and nothing marks it as a guess. Better she keeps "
-          "less and all of it true."))
+A(P("While you're still talking she does follow the thread, so you can say “what did I just say?” "
+    "and she'll know. It's only between conversations that it doesn't carry over."))
+
+A(callout("<b>Why it works this way:</b> all of it used to be automatic, and all of it was quietly "
+          "inventing history. She'd store the same fact twice under different names, and once wrote "
+          "a long reflection about the person “moving between unrelated topics” — drawn entirely "
+          "from a list of test commands, not a real conversation. She also used to search old "
+          "conversations, which meant a half-finished thought from weeks ago could resurface in a "
+          "conversation it had nothing to do with. Once something like that is written down it "
+          "shapes every later reply, and nothing marks it as a guess. Better she keeps less and "
+          "all of it true."))
 
 A(H2("How a conversation ends"))
 A(P("You don't have to say goodbye. If you stop talking for about twelve minutes, she quietly "
@@ -219,9 +211,9 @@ A(bullets([
     "If something sounds off, it probably is. Say so, and she'll correct.",
     "<b>Anything needing exact precision.</b> Spelling things out letter by letter, codes, arithmetic, "
     "counting. She gets these wrong confidently, even when told the right answer.",
-    "<b>Mostly nothing outside this computer.</b> No email, no browsing, no apps. Weather and "
-    "explicitly-asked-for lookups are the one deliberate exception — everything else she knows comes "
-    "from what she was built with, what you've told her, and what you've given her to read.",
+    "<b>Nothing outside this computer.</b> No email, no browsing, no apps, no weather, no looking "
+    "anything up. Everything she knows comes from what she was built with, what you've told her, "
+    "and what you've given her to read. If she doesn't know, she can't go and find out.",
     "<b>She isn't a doctor or a therapist.</b> She's good company and she'll listen. That's a different "
     "thing, and she's told not to pretend otherwise.",
 ]))
@@ -249,9 +241,11 @@ A(table([
 ], [55, 110]))
 
 A(H2("Privacy, plainly"))
-A(P("Her microphone is on whenever the dot is filled, and she writes down what is said to her so she "
-    "can remember you. It stays on this computer. If you want her not to hear something, say "
-    "<b>“Lia, stop listening”</b> — or right-click the dot and untick <b>Listening</b>."))
+A(P("Her microphone is on whenever the dot is filled. What she hears is turned into a reply and then "
+    "let go — the only thing written down is what you specifically asked her to remember. Nothing "
+    "leaves this computer, because she has no way to send it anywhere. If you want her not to hear "
+    "something at all, say <b>“Lia, stop listening”</b> — or right-click the dot and untick "
+    "<b>Listening</b>."))
 
 A(callout("<b>The one thing to remember.</b> Say <b>“Lia”</b>, wait a few seconds, then talk normally. "
           "Everything else is optional."))
