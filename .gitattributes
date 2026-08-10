@@ -1,0 +1,19 @@
+# Git for Windows sets core.autocrlf=true by default, which rewrites LF to CRLF
+# on checkout for anything it decides is text. It decides by looking for a NUL
+# byte near the start of the file -- and a PDF begins with "%PDF-1.4" and a
+# stretch of ASCII, so every PDF in docs/ was being classified as text.
+#
+# The stored blobs were fine; the damage happened on the way out. A fresh clone
+# got PDFs 200-2400 bytes larger than the originals, with a CR injected before
+# every LF and every byte offset in the xref table therefore wrong. Tolerant
+# readers repair them silently, which is why this went unnoticed -- strict ones
+# report a broken file.
+#
+# The .onnx voices were never affected: protobuf has a NUL early enough for the
+# heuristic to catch it. Marked anyway rather than relying on that.
+*.pdf   binary
+*.onnx  binary
+*.db    binary
+
+# Everything else can be normalised to LF in the repository as usual.
+* text=auto
