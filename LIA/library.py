@@ -278,23 +278,68 @@ def describe_wait(seconds: float) -> str:
     return f"around {int(round(minutes / 5.0) * 5)} minutes"
 
 
-def ingest_file(path: Path, on_progress=None) -> int:
-    """Index one file, replacing any previous version of it. Returns chunk count."""
-    key = _key(path)
-    db.forget_document(key)
+# How many passages to hold before writing them down. Small enough that an
+# interruption costs seconds of embedding rather than minutes, large enough that
+# a 600-passage book isn't 600 separate transactions.
+_FLUSH_EVERY = 8
 
+
+def ingest_file(path: Path, on_progress=None) -> int:
+    """Index one file, replacing any previous version of it. Returns chunk count.
+
+    Written page by page rather than all at the end. A novel is around 600
+    passages and twenty-five minutes, and holding every one of them in memory
+    until the last had a sharp edge: an interruption at minute twenty-four --
+    a restart, a logout, closing the tray app -- threw away the entire run.
+    That happened for real, twice, and left nothing behind to show for it.
+
+    So passages land as they are embedded, and a run that stops partway is
+    picked up where it left off instead of starting over. Chunking is
+    deterministic, so counting what survived is enough to know where that is.
+
+    Rows carry mtime 0 while a file is in progress and are stamped with the
+    file's real mtime only once it completes. pending() compares mtime, so a
+    half-read book still reads as unfinished -- the failure to avoid is a
+    partial index that looks whole.
+    """
+    key = _key(path)
     mtime = path.stat().st_mtime
-    rows = []
+
+    # Anything already here with mtime 0 is the tail of an interrupted run.
+    # Only clear the document when starting fresh, or resuming would delete
+    # exactly the work it is meant to save.
+    done = db.unfinished_chunk_count(key)
+    if not done:
+        db.forget_document(key)
+
+    seen = 0
+    batch = []
     for page, text in extract(path):
         for index, piece in enumerate(chunk(text)):
+            seen += 1
+            if seen <= done:
+                continue          # embedded on an earlier run, still in the db
             vector = llm.embed(piece)
-            rows.append((key, path.stem, page or None, index, piece, json.dumps(vector), mtime))
+            batch.append((key, path.stem, page or None, index, piece,
+                          json.dumps(vector), 0.0))
             if on_progress is not None:
-                on_progress(len(rows))
+                on_progress(seen)
+            # Also flushed mid-page. A PDF arrives a page at a time and the page
+            # boundary alone would be fine, but a .txt or .md is one single
+            # "page" however long it is -- so on those, flushing only at the end
+            # of a page is the all-or-nothing behaviour this replaced.
+            if len(batch) >= _FLUSH_EVERY:
+                db.insert_document_chunks(batch)
+                batch = []
+        if batch:
+            db.insert_document_chunks(batch)
+            batch = []
 
-    if rows:
-        db.insert_document_chunks(rows)
-    return len(rows)
+    if batch:
+        db.insert_document_chunks(batch)
+
+    db.finish_document(key, mtime)
+    return seen
 
 
 def sync(on_progress=None) -> tuple[int, int]:

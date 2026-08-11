@@ -165,6 +165,44 @@ def insert_document_chunks(rows: list[tuple]):
     conn.close()
 
 
+def unfinished_chunk_count(path: str) -> int:
+    """How many passages of this document were written by a run that never
+    finished. Rows carry mtime 0 until the whole file is indexed, so this is
+    both the "was it interrupted" test and the place to resume from."""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM documents WHERE path = ? AND mtime = 0", (path,)
+    ).fetchone()
+    conn.close()
+    return row["n"]
+
+
+def any_unfinished_documents() -> bool:
+    """Is some document part-read anywhere? True while a scan is in flight.
+
+    Deliberately asked of the database rather than tracked in memory: the scan
+    may be running in another process entirely, and an in-process flag is
+    invisible to it. Reading the library was stalled for nine minutes at a time
+    by exactly that -- the tray app released the models from VRAM because, as
+    far as its own flag knew, nothing was using them."""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT 1 FROM documents WHERE mtime = 0 LIMIT 1"
+    ).fetchone()
+    conn.close()
+    return row is not None
+
+
+def finish_document(path: str, mtime: float):
+    """Stamp a document's passages with the file's real mtime, marking it fully
+    read. Until this runs, indexed_documents() reports 0 for it and pending()
+    keeps offering it."""
+    conn = get_conn()
+    conn.execute("UPDATE documents SET mtime = ? WHERE path = ?", (mtime, path))
+    conn.commit()
+    conn.close()
+
+
 def all_document_chunks():
     conn = get_conn()
     rows = conn.execute(

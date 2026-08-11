@@ -313,6 +313,30 @@ def build_library_context(user_input: str, query_vec=None) -> dict | None:
     }
 
 
+# Set for as long as a library scan is running. The idle watchdog reads it:
+# closing out a quiet conversation releases the models, and a book takes far
+# longer to read than the twelve minutes of silence that triggers that -- so an
+# unattended scan was having nomic-embed-text pulled out of VRAM underneath it.
+_indexing = threading.Event()
+
+
+def indexing_now() -> bool:
+    """Is anything being read right now, by her or by anything else?
+
+    The event covers her own background thread. The database check covers a scan
+    running in a separate process, which the event cannot see -- and that is not
+    hypothetical: reading a novel was stalled nine minutes at a stretch because
+    she released the models while an external indexer was mid-book.
+    """
+    if _indexing.is_set():
+        return True
+    try:
+        return db.any_unfinished_documents()
+    except Exception:
+        # Never let a database hiccup wedge the models in VRAM forever.
+        return False
+
+
 def sync_library(announce: bool = True, quiet: bool = False) -> tuple[int, int]:
     """Index anything new in the library folder."""
     waiting = library.pending()
@@ -328,7 +352,11 @@ def sync_library(announce: bool = True, quiet: bool = False) -> tuple[int, int]:
         if not quiet:
             status(f"reading, {count} passages so far")
 
-    files_done, chunks = library.sync(on_progress=progress)
+    _indexing.set()
+    try:
+        files_done, chunks = library.sync(on_progress=progress)
+    finally:
+        _indexing.clear()
     if not quiet:
         clear_status()
     if announce and chunks:
@@ -1072,9 +1100,14 @@ def close_out(session: Session, free_memory: bool = True) -> bool:
     if not turns:
         return False
     end_session(session_id, turns)
-    if free_memory and RELEASE_MODELS_WHEN_IDLE:
+    if free_memory and RELEASE_MODELS_WHEN_IDLE and not indexing_now():
         # The conversation is over and the diary is written -- nothing more will
         # be asked of the models until you come back, so give the VRAM up.
+        #
+        # Unless she's still reading something. "Nothing more will be asked of
+        # the models" is only true of the conversation; a scan running in the
+        # background is asking the embedding model for a passage every couple of
+        # seconds, and unloading underneath it stalls the read it was told to do.
         llm.unload()
         print("[released the models -- she'll reload them when you speak]")
     return True

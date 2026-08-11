@@ -445,7 +445,19 @@ WAKE_WORDS = ["lia", "leah", "lea", "liya", "leia", "lya", "lija", "lya"]
 
 # After she answers, keep listening without the name for this long, so you can
 # just talk instead of saying "Lia" before every sentence.
-CONVERSATION_WINDOW_SECONDS = 30
+#
+# Zero: her name is required every single time, with no exceptions.
+#
+# The window was the one hole in the wake word. For 30 seconds after each reply
+# she accepted whatever she heard, addressed to her or not -- and with a video
+# playing in the room, that is the television talking to her. Her log is full of
+# football commentary and game reviews transcribed in full, and any of it landing
+# inside the window would have been answered as though it were you.
+#
+# The cost is real and deliberate: a follow-up now needs her name too. "Hey Lia,
+# what did you mean?" rather than just "what did you mean?". Set it back to 20 or
+# 30 if you would rather have the easy back-and-forth and the room is quiet.
+CONVERSATION_WINDOW_SECONDS = 0
 
 # Same thing after her startup greeting, but shorter. She greets the room at
 # login whether or not you're there, so a full window invites her to answer the
