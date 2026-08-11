@@ -34,19 +34,38 @@ DB_PATH = str(DATA_DIR / "lia_memory.db")
 # thing that can't be manufactured up front. Costs a line of text per command.
 INTENT_LOG = True
 
-# How long Ollama holds the models in memory after a request. Ollama's default
-# is 5m, which means the first thing you say after a break costs ~9s of cold
-# start instead of ~2.4s. The trade is ~2GB of VRAM held the whole time (and
-# noticeably worse battery life on a laptop). "-1" keeps them loaded forever.
-# Long on purpose. This is only a backstop now -- she explicitly releases the
-# models when a conversation ends (see RELEASE_MODELS_WHEN_IDLE), so the timer
-# only matters if she's killed before she can.
-OLLAMA_KEEP_ALIVE = "30m"
+# How long Ollama holds the models in memory after a request.
+#
+# This used to be a backstop, because she explicitly released the models when a
+# conversation ended. Now that RELEASE_MODELS_WHEN_IDLE is off, this timer is
+# the whole policy -- and at "30m" it undid the point of that change, since a
+# break longer than half an hour is exactly the ordinary case where you come
+# back and speak to her cold.
+#
+# The integer -1 means forever. It must be the integer: the note that used to
+# sit here said '"-1" keeps them loaded forever', and the quoted form is parsed
+# as a duration by Ollama and rejected outright --
+#     400 {"error":"time: missing unit in duration \"-1\""}
+# -- which takes down chat and embedding alike. A duration string works too if
+# you prefer one ("8760h" is a year); "-1" is the only value that looks right
+# and isn't.
+#
+# Costs the same ~3.7GB as the setting below, and the two want to agree with
+# each other: set this back to "30m" if you turn releasing back on.
+OLLAMA_KEEP_ALIVE = -1
 
-# Free the ~3.7GB of VRAM as soon as a conversation closes out, instead of
-# leaving it held until the keep-alive expires. She knows when you've stopped
-# talking, which is better information than any timeout.
-RELEASE_MODELS_WHEN_IDLE = True
+# Off: the models stay resident, and the first thing you say after a break is
+# as quick as the last thing you said before it.
+#
+# Releasing was the tidier behaviour and it cost the wrong thing. A cold load is
+# 10.7s measured, against 2.4s warm -- so the price was paid precisely when
+# someone walks up and speaks to her, which is the moment she most needs to feel
+# present. Holding the VRAM is invisible; a ten-second silence is not.
+#
+# What this costs: ~3.7GB of the 4GB card held for as long as she's running.
+# Turn it back on if you want the GPU for something else -- a game, video
+# editing -- or if you're on battery, where holding it is real power draw.
+RELEASE_MODELS_WHEN_IDLE = False
 
 # Start loading the model the moment you begin speaking, so the reload overlaps
 # with transcribing you rather than happening after it.
@@ -466,10 +485,24 @@ CONVERSATION_WINDOW_SECONDS = 0
 GREETING_WINDOW_SECONDS = 30
 
 # Whisper size for listening: tiny.en / base.en / small.en.
-# small.en gets names right that base.en garbles ("Anaya" -> "Ania"), and the
-# extra second is nothing against a 20-60s reply.
 # Runs on CPU on purpose, so it doesn't compete with Ollama for the 4GB of VRAM.
-WHISPER_MODEL = "small.en"
+#
+# Measured on this machine, int8 on CPU, per spoken turn:
+#     tiny.en   0.45s
+#     base.en   0.77s
+#     small.en  2.44s
+#
+# small.en was chosen when the note above was written, on the reasoning that
+# "the extra second is nothing against a 20-60s reply". That reasoning no longer
+# holds: a reply is now about 3.5s, not 20-60, so small.en was the single
+# largest cost in the whole turn -- larger than the language model it was being
+# excused against. base.en gives 1.7s back, which is more than moving the chat
+# model to a cloud API would have saved.
+#
+# The trade is real and unchanged: base.en garbles names small.en gets right
+# ("Anaya" -> "Ania"). If she starts mangling the names of people who matter,
+# this is the line to put back.
+WHISPER_MODEL = "base.en"
 
 # This is the distilled, load-bearing version of the LIA spec.
 # Kept short on purpose -- small local models follow short, concrete
