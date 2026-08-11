@@ -283,6 +283,23 @@ def describe_wait(seconds: float) -> str:
 # a 600-passage book isn't 600 separate transactions.
 _FLUSH_EVERY = 8
 
+# Ebook tools name files with the whole catalogue record -- author, series,
+# city, publisher, date, ISBN, a content hash. She reads the title aloud with
+# every citation, so the raw filename had her reciting an ISBN and an MD5 at
+# someone who only asked who Hagrid was. Everything after the first " -- " is
+# metadata about the book rather than its name.
+_MAX_TITLE = 70
+
+
+def _title(path: Path) -> str:
+    """A short, speakable name for a document -- what she says when citing it."""
+    stem = path.stem.strip()
+    name = stem.split(" -- ")[0].strip(" -_") or stem
+    if len(name) > _MAX_TITLE:
+        # Cut on a word boundary; a title chopped mid-word sounds like a fault.
+        name = name[:_MAX_TITLE].rsplit(" ", 1)[0] + "..."
+    return name
+
 
 def ingest_file(path: Path, on_progress=None) -> int:
     """Index one file, replacing any previous version of it. Returns chunk count.
@@ -320,7 +337,7 @@ def ingest_file(path: Path, on_progress=None) -> int:
             if seen <= done:
                 continue          # embedded on an earlier run, still in the db
             vector = llm.embed(piece)
-            batch.append((key, path.stem, page or None, index, piece,
+            batch.append((key, _title(path), page or None, index, piece,
                           json.dumps(vector), 0.0))
             if on_progress is not None:
                 on_progress(seen)
