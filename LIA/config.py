@@ -18,7 +18,18 @@ else:
     BASE_DIR = Path(__file__).parent
     DATA_DIR = BASE_DIR.parent
 
-OLLAMA_URL = "http://localhost:11434"
+# 127.0.0.1, never "localhost". Ollama binds to 127.0.0.1, and resolving
+# "localhost" on Windows offers ::1 first -- nothing is listening there, and the
+# failed IPv6 attempt costs about two seconds before it falls back to IPv4.
+#
+# Measured, same model, same prompt, same request:
+#     http://localhost:11434    2.38s
+#     http://127.0.0.1:11434    0.35s
+#
+# That two seconds was being paid by every chat, every embedding, and every
+# passage of every document indexed -- it was the largest single cost in a
+# spoken turn, and none of it was the model thinking.
+OLLAMA_URL = "http://127.0.0.1:11434"
 
 # Pick whatever you've pulled with `ollama pull <name>`.
 # llama3.2:3b / gemma2:2b / phi3:mini all fit comfortably on 4GB VRAM.
@@ -303,7 +314,38 @@ CHUNK_OVERLAP = 150
 
 # Passages below this similarity are ignored -- better she says she doesn't know
 # than dredge up an unrelated paragraph because it was the closest match.
+#
+# This is now the second filter, not the first. It cannot be the first: measured
+# against a real indexed novel, a genuine question scored 0.519 and ordinary
+# small talk scored 0.583, so the two populations overlap and no floor separates
+# them. See judge.py. Left where it is to catch weak matches within a question
+# that genuinely is about the library.
 LIBRARY_MIN_SCORE = 0.45
+
+# --- the judge ---
+# One closed question, asked before the expensive work runs: "is this person
+# asking about a document?". See judge.py for why a similarity floor cannot
+# answer it.
+#
+# Off: every turn searches the library again, which is what put five hundred
+# tokens of somebody else's novel in front of every "how was your day".
+JUDGE_ENABLED = True
+
+# The chat model does the judging. A dedicated small model was tried first, on
+# the assumption that a yes/no shouldn't need the big one -- qwen2.5:0.5b, 400MB,
+# sitting on the GPU beside it. Measured over 36 classifications:
+#
+#     qwen2.5:0.5b   24/36   0.34s
+#     llama3.2:3b    35/36   0.49s
+#
+# The small one lost real questions ("who is Hagrid" -> don't search), which is
+# the worse failure of the two. 0.15s is not worth 11 wrong answers, and reusing
+# the chat model means one less thing loaded on a 4GB card.
+#
+# The premise was wrong rather than the model: a tiny judge was there to avoid
+# latency that turned out to be a hostname (see OLLAMA_URL). Once a request cost
+# 0.35s instead of 2.4s, there was nothing left for it to save.
+JUDGE_MODEL = MODEL_CHAT
 
 # Greet you when she starts up, instead of waiting silently.
 #
@@ -324,10 +366,22 @@ GREET_ON_START = False
 # told her to keep. Storage stops growing: notes are a line of text each,
 # instead of a 768-number vector per turn.
 #
-# The cost, so it isn't a surprise: she can no longer recall anything you said
-# in an earlier session unless you asked her to remember it. Within a single
-# conversation she still has the last SHORT_TERM_TURNS turns as usual.
-REMEMBER_CONVERSATION = False
+# Back on, with the guard that was missing the first time. What made this
+# confusing was never the storing -- it was retrieval handing back its top
+# MEMORY_TOP_K however weak the matches were, so a half-finished thought from
+# weeks ago surfaced in a conversation it had nothing to do with. MEMORY_MIN_SCORE
+# is 0.55 now, checked against real stored turns rather than guessed, and weak
+# matches are dropped instead of forced in.
+#
+# Turned off entirely once because "she keeps getting confused", and the cost of
+# that turned out to be the thing underneath the next complaint: she stopped
+# growing. She had no recollection of anything said in an earlier session.
+# Storage is not the worry it looked like either -- a turn is a line of text and
+# a vector, against the 671-passage novel already in the same database.
+#
+# Set False again if the confusion comes back, but raise MEMORY_MIN_SCORE first:
+# that is the dial that actually governs it.
+REMEMBER_CONVERSATION = True
 
 # Off: she never decides for herself what's worth keeping about you. She
 # remembers when you say "remember that ...", and not otherwise.
@@ -510,8 +564,13 @@ WHISPER_MODEL = "base.en"
 SYSTEM_PROMPT = """You are Lia, short for Locally Integrated Artificial Intelligence.
 You are a calm, patient companion. Not an assistant, not a therapist.
 
-Speak in short, natural sentences. Never lecture or dump information -- explain a little,
-then let the conversation breathe.
+Speak naturally, the way someone talks rather than writes. Two or three sentences is
+usually right -- enough to actually say something, and to show you were listening.
+
+Don't lecture or dump information, but don't be clipped either. A one-line answer to
+something someone cared enough to tell you reads as disinterest. If they mention
+something that matters to them, respond to the thing itself before anything else, and
+ask about it if you're curious.
 
 Be warm but never scripted or overly cheerful. Never sarcastic or dismissive.
 
