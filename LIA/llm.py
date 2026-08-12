@@ -117,6 +117,10 @@ def chat_tools(messages: list[dict], tools: list[dict], timeout: float = 30) -> 
     return resp.json().get("message", {}).get("tool_calls") or []
 
 
+class RateLimited(RuntimeError):
+    """The hosted model refused this turn because of its free-tier limits."""
+
+
 def using_cloud() -> bool:
     """Is the conversation going to a hosted model this turn?"""
     return bool(CLOUD_CHAT_ENABLED and OPENROUTER_API_KEY)
@@ -149,6 +153,11 @@ def _cloud_stream(messages: list[dict]):
         timeout=60,
         stream=True,
     )
+    # Free models are rate limited rather than billed, so 429 is an ordinary
+    # weather condition here, not an exception. Named so the log says which of
+    # the two it was, since "slow" and "refused" want different responses.
+    if resp.status_code == 429:
+        raise RateLimited(f"{OPENROUTER_MODEL} is rate limited right now")
     resp.raise_for_status()
 
     said_anything = False
@@ -202,11 +211,17 @@ def chat_stream(messages: list[dict]):
             return
         except Exception as exc:
             if spoke:
-                # Already part-way through saying something -- finishing it with
-                # a different model would splice two half-replies together.
+                # Already part-way through saying something. Restarting on the
+                # local model would splice two half-replies into one sentence,
+                # so let it stand -- but say so, because a reply that simply
+                # stops mid-thought is otherwise a mystery. Seen for real: a
+                # free provider dropped the connection mid-stream.
+                print("\n[cloud stream dropped -- that reply may be cut short]",
+                      flush=True)
                 return
-            print(f"\n[cloud unavailable ({type(exc).__name__}) -- answering locally]",
-                  flush=True)
+            why = ("rate limited" if isinstance(exc, RateLimited)
+                   else type(exc).__name__)
+            print(f"\n[cloud unavailable ({why}) -- answering locally]", flush=True)
 
     resp = requests.post(
         f"{OLLAMA_URL}/api/chat",

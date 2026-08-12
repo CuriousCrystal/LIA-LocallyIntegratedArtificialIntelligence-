@@ -210,7 +210,22 @@ GROQ_MODEL = "llama-3.3-70b-versatile"
 # completion, this genuinely can answer something that happened yesterday.
 # Tried first when both keys are present, since a real search beats a guess.
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
-OPENROUTER_MODEL = "openai/gpt-4o-mini"
+# The ":free" suffix is the whole point of this line: those models are rate
+# limited rather than billed. "openai/gpt-4o-mini" reads like it should be free
+# and is not -- it charged $0.0003 in an afternoon of testing, which is nothing,
+# but it is not zero and it does not stop.
+#
+# Measured across the free models that actually answered, on her real prompt:
+#
+#   google/gemma-4-26b-a4b-it:free      2.2-5.6s to first word, stayed in character
+#   nvidia/nemotron-3-super-120b:free   16-40s to first word -- unusable for voice
+#   google/gemma-4-31b-it:free          429, rate limited on every attempt
+#   nvidia/nemotron-3-ultra-550b:free   dropped the connection mid-stream
+#
+# Free means queued behind everyone else, so expect the occasional 429 and the
+# occasional dropped stream. Both fall back to the local model rather than
+# leaving her silent -- see llm.chat_stream.
+OPENROUTER_MODEL = "google/gemma-4-26b-a4b-it:free"
 OPENROUTER_ONLINE = True
 
 
