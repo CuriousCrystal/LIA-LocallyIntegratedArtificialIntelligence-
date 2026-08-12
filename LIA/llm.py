@@ -56,23 +56,36 @@ from config import OLLAMA_URL, MODEL_CHAT, MODEL_EMBED, OLLAMA_KEEP_ALIVE, NUM_C
 OPTIONS = {"num_ctx": NUM_CTX}
 
 
-def chat(messages: list[dict], json_mode: bool = False) -> str:
+def chat(messages: list[dict], json_mode: bool = False,
+         model: str | None = None, num_predict: int | None = None,
+         timeout: float = 120) -> str:
     """messages: list of {"role": "system"|"user"|"assistant", "content": str}
 
     json_mode constrains the model to emit valid JSON -- used for fact extraction,
     where a 3B model otherwise likes to wrap the object in explanatory prose.
+
+    `model` runs the request against something other than MODEL_CHAT. That exists
+    for the small classifiers (see judge.py): a yes/no question doesn't need the
+    conversational model, and asking a 0.5B costs a fraction of the time.
+
+    `num_predict` caps the reply length. A classifier that has answered "yes" has
+    nothing further to say, and letting it run on is pure latency.
     """
+    options = dict(OPTIONS)
+    if num_predict is not None:
+        options["num_predict"] = num_predict
+
     payload = {
-        "model": MODEL_CHAT,
+        "model": model or MODEL_CHAT,
         "messages": messages,
         "stream": False,
         "keep_alive": OLLAMA_KEEP_ALIVE,
-        "options": OPTIONS,
+        "options": options,
     }
     if json_mode:
         payload["format"] = "json"
 
-    resp = requests.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=120)
+    resp = requests.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=timeout)
     resp.raise_for_status()
     return resp.json()["message"]["content"]
 

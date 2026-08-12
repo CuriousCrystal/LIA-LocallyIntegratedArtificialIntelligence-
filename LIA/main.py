@@ -39,6 +39,7 @@ import db
 import diary
 import intent
 import internet
+import judge
 import library
 import llm
 import media
@@ -1379,10 +1380,15 @@ def main(controls: "Controls | None" = None):
                 if mem_context:
                     messages.append(mem_context)
 
-            status("checking her reading")
-            lib_context = build_library_context(user_input, query_vec=query_vec)
-            if lib_context:
-                messages.append(lib_context)
+            # Asked before searching, not after. The similarity floor can only
+            # rank passages once it has them; it cannot tell that the question
+            # was never about a book in the first place -- and with a novel
+            # indexed, every ordinary sentence found something.
+            if judge.wants_library(user_input):
+                status("checking her reading")
+                lib_context = build_library_context(user_input, query_vec=query_vec)
+                if lib_context:
+                    messages.append(lib_context)
 
         messages.extend(session.recent(SHORT_TERM_TURNS))
         messages.append({"role": "user", "content": user_input})
