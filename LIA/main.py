@@ -79,6 +79,9 @@ from config import (
     INTERNET_TRIGGER_PHRASES,
     VOLUME_STEP,
     SPEAKER_ENROLL_TARGET,
+    LIBRARY_TOP_K,
+    CLOUD_HISTORY_TURNS,
+    CLOUD_LIBRARY_TOP_K,
 )
 
 HELP = """
@@ -291,7 +294,11 @@ def build_internet_context(user_input: str) -> dict | None:
 def build_library_context(user_input: str, query_vec=None) -> dict | None:
     """Passages from your documents that bear on what you just asked."""
     try:
-        found = library.search(user_input, query_vec=query_vec)
+        # Passages are the largest thing that can land in a prompt, so a cloud
+        # turn takes fewer of them. Two is enough to answer from, and the judge
+        # has already decided the question was about a document at all.
+        top_k = CLOUD_LIBRARY_TOP_K if llm.using_cloud() else LIBRARY_TOP_K
+        found = library.search(user_input, top_k=top_k, query_vec=query_vec)
     except requests.RequestException:
         return None
     if not found:
@@ -1390,7 +1397,11 @@ def main(controls: "Controls | None" = None):
                 if lib_context:
                     messages.append(lib_context)
 
-        messages.extend(session.recent(SHORT_TERM_TURNS))
+        # A shorter history when the turn is billed by the token. Four turns is
+        # still a conversation that knows what it's about, at half the prompt --
+        # and prompt size, not reply size, is where the spend actually goes.
+        messages.extend(session.recent(
+            CLOUD_HISTORY_TURNS if llm.using_cloud() else SHORT_TERM_TURNS))
         messages.append({"role": "user", "content": user_input})
 
         status("thinking")

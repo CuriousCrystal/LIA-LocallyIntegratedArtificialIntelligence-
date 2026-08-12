@@ -213,6 +213,45 @@ OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = "openai/gpt-4o-mini"
 OPENROUTER_ONLINE = True
 
+
+# --- cloud chat ---
+# The conversation itself goes to a hosted model instead of the local 3B, which
+# is the one thing local hardware cannot fix. Everything else stays here:
+# speech, embeddings, the library, memory, and every classifier.
+#
+# That last point is deliberate and is most of the cost control. The judge runs
+# on every single turn, intent.py runs whenever a phrase doesn't match, and fact
+# extraction runs at the end of a session -- sending those to the cloud would
+# multiply the bill for work a 3B already does well. Only what you actually say
+# to her leaves the machine.
+#
+# Falls back to Ollama whenever the request fails, so a dropped connection makes
+# her briefly less clever rather than mute.
+CLOUD_CHAT_ENABLED = True
+
+# --- keeping the meter down ---
+# A companion that sits on an open mic all day can spend a lot on nothing much,
+# and the cost is almost all in what gets *sent*, not what comes back. These are
+# smaller than their local equivalents on purpose.
+#
+# History: SHORT_TERM_TURNS is 8 locally. Four turns is still a conversation
+# that remembers what it is about, at half the prompt.
+CLOUD_HISTORY_TURNS = 4
+
+# Retrieved passages are the single largest thing that can land in a prompt --
+# up to three at CHUNK_CHARS each. Two is plenty to answer from, and only ever
+# sent when the judge says the question was about a document at all.
+CLOUD_LIBRARY_TOP_K = 2
+
+# She speaks her replies, and a spoken paragraph is already long. This is a
+# ceiling, not a target -- it truncates a runaway answer rather than shortening
+# an ordinary one.
+CLOUD_MAX_TOKENS = 250
+
+# Print the token count of each cloud turn to the log, so the spend is visible
+# while it is happening rather than at the end of the month.
+CLOUD_LOG_USAGE = True
+
 # Say any of these and, if she's online, she answers from a real search
 # (OpenRouter's :online mode, or Groq as a fallback) instead of guessing from
 # what a 3B local model already knows.

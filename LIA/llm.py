@@ -51,7 +51,11 @@ def wait_until_ready(total_seconds: float = 180, try_launch: bool = True) -> boo
         time.sleep(2)
     return False
 
-from config import OLLAMA_URL, MODEL_CHAT, MODEL_EMBED, OLLAMA_KEEP_ALIVE, NUM_CTX
+from config import (
+    OLLAMA_URL, MODEL_CHAT, MODEL_EMBED, OLLAMA_KEEP_ALIVE, NUM_CTX,
+    CLOUD_CHAT_ENABLED, CLOUD_MAX_TOKENS, CLOUD_LOG_USAGE,
+    OPENROUTER_API_KEY, OPENROUTER_MODEL,
+)
 
 OPTIONS = {"num_ctx": NUM_CTX}
 
@@ -113,12 +117,97 @@ def chat_tools(messages: list[dict], tools: list[dict], timeout: float = 30) -> 
     return resp.json().get("message", {}).get("tool_calls") or []
 
 
+def using_cloud() -> bool:
+    """Is the conversation going to a hosted model this turn?"""
+    return bool(CLOUD_CHAT_ENABLED and OPENROUTER_API_KEY)
+
+
+def _cloud_stream(messages: list[dict]):
+    """Yield the reply from OpenRouter, a piece at a time.
+
+    Streamed rather than fetched whole for the same reason the local path is:
+    she starts speaking her first sentence while the rest is still arriving. A
+    non-streaming cloud call would feel slower than the local model despite
+    being faster, because nothing can be said until all of it lands.
+    """
+    resp = requests.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "HTTP-Referer": "https://github.com/lia-companion",
+            "X-Title": "Lia",
+        },
+        json={
+            "model": OPENROUTER_MODEL,
+            "messages": messages,
+            "stream": True,
+            "max_tokens": CLOUD_MAX_TOKENS,
+            # Asks for the token counts in the final chunk, so the spend is
+            # visible per turn instead of only on the dashboard.
+            "stream_options": {"include_usage": True},
+        },
+        timeout=60,
+        stream=True,
+    )
+    resp.raise_for_status()
+
+    said_anything = False
+    for raw in resp.iter_lines():
+        if not raw:
+            continue
+        line = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
+        if not line.startswith("data: "):
+            continue
+        body = line[6:].strip()
+        if body == "[DONE]":
+            break
+        try:
+            chunk = json.loads(body)
+        except ValueError:
+            continue
+
+        usage = chunk.get("usage")
+        if usage and CLOUD_LOG_USAGE:
+            print(f"\n[cloud: {usage.get('prompt_tokens')} in / "
+                  f"{usage.get('completion_tokens')} out]", flush=True)
+
+        for choice in chunk.get("choices", []):
+            piece = (choice.get("delta") or {}).get("content") or ""
+            if piece:
+                said_anything = True
+                yield piece
+
+    if not said_anything:
+        # An empty 200 is not a reply. Raise so the caller falls back to the
+        # local model rather than leaving her silent.
+        raise RuntimeError("cloud returned no content")
+
+
 def chat_stream(messages: list[dict]):
     """Same as chat(), but yields token chunks as they arrive.
 
     A 3B model on 4GB VRAM takes tens of seconds per reply -- without streaming
     the terminal looks frozen the whole time.
+
+    Goes to the cloud when one is configured, and falls back to Ollama on any
+    failure. The fallback is the point: the network is the one part of this she
+    does not own, so losing it should cost cleverness, not speech.
     """
+    if using_cloud():
+        try:
+            spoke = False
+            for piece in _cloud_stream(messages):
+                spoke = True
+                yield piece
+            return
+        except Exception as exc:
+            if spoke:
+                # Already part-way through saying something -- finishing it with
+                # a different model would splice two half-replies together.
+                return
+            print(f"\n[cloud unavailable ({type(exc).__name__}) -- answering locally]",
+                  flush=True)
+
     resp = requests.post(
         f"{OLLAMA_URL}/api/chat",
         json={
