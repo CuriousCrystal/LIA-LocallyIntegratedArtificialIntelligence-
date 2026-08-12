@@ -271,9 +271,10 @@ A(bullets([
     "conversation it had nothing to do with reads the same way from the outside, and unlike the "
     "diary or the fact extractor, <i>this one got worse as the database grew</i>.",
 ]))
-A(P("What's left is a companion that talks, listens, reads what she's given, plays what she's "
-    "given, sets alarms, and keeps exactly the notes she was asked to keep. She now makes no "
-    "network call whatsoever beyond Ollama on the same machine."))
+A(P("What was left at that point was a companion that talks, listens, reads what she's given, plays "
+    "what she's given, sets alarms, and keeps exactly the notes she was asked to keep — making no "
+    "network call whatsoever beyond Ollama on the same machine. <i>(That last part held until the "
+    "stage below, where the thinking moved off the machine.)</i>"))
 A(callout("<b>Each of these is a flag, not a deletion.</b> <font face='Courier'>INTERNET_ENABLED</font>, "
           "<font face='Courier'>WEATHER_ENABLED</font> and <font face='Courier'>REMEMBER_CONVERSATION</font> "
           "all restore the old behaviour on their own. The code was left intact deliberately: "
@@ -283,6 +284,69 @@ A(P("One side effect, unplanned and welcome: with nothing stored to search and a
     "the per-turn embedding call had nothing left to do, so it's now skipped entirely. Replies come "
     "back about two seconds sooner. Removing features made her faster, which is not usually how "
     "that goes.", "LiaNote"))
+
+A(H2("The two seconds that were never the model"))
+A(P("She was slow — around eight seconds from finishing a sentence to hearing one back — and the "
+    "diagnosis looked obvious: a 3B model spilling a third of itself onto the CPU of a 4GB card. "
+    "That reading led to a long, sensible conversation about cloud models and what they would buy."))
+A(P("<b>It was wrong.</b> Measuring where the time actually went, rather than where it obviously "
+    "should have gone, found that a request to a 0.5B model cost the same as one to the 3B: about "
+    "2.4 seconds either way. Model size changed nothing, prompt length changed nothing, context "
+    "size changed nothing. That is not what inference looks like."))
+A(callout("<font face='Courier'>OLLAMA_URL</font> was "
+          "<font face='Courier'>http://localhost:11434</font>. Ollama binds to 127.0.0.1, and "
+          "resolving “localhost” on Windows offers ::1 first — nothing is listening there, and the "
+          "failed IPv6 attempt cost about two seconds before falling back. Measured on the same "
+          "request: <b>localhost 2.38s, 127.0.0.1 0.35s.</b> It was being paid by every chat, every "
+          "embedding, and every passage of every document indexed."))
+A(bullets([
+    "A spoken turn went from <b>7.89s to 1.83s</b>.",
+    "Embedding a turn went from 2.13s to 0.11s.",
+    "The novel that took 42 minutes to index would now take about five.",
+    "It never showed up as a fault because a reused HTTP session hides it entirely — it only bites "
+    "the one-shot requests the whole app is made of.",
+]))
+A(P("<b>What it invalidated is the useful part.</b> The case for moving embeddings to a cloud API "
+    "rested on a 2.1s local cost that was almost entirely this. The case for a cloud chat model "
+    "rested on a 2.4s first token that was mostly this. Both arguments were built on a measurement "
+    "that was real, repeatable, and measuring the wrong thing.", "LiaNote"))
+
+A(H2("A specialist, built and then thrown away"))
+A(P("The idea was several small models rather than one: a tiny classifier answering “is this "
+    "question about a document?” in front of the library search, because a similarity floor "
+    "provably could not — a genuine question scored 0.519 and ordinary small talk 0.583, so the two "
+    "populations overlap and no threshold separates them. A novel is <i>about</i> sleeping and "
+    "eating and families; small talk genuinely resembles it."))
+A(P("The judge worked. The 0.5B model chosen to run it did not: 24 of 36 against the 3B's 35 of 36, "
+    "and it failed in the worse direction, dropping real questions about the book. It existed only "
+    "to dodge latency that turned out to be the hostname above. Once a request cost 0.35s rather "
+    "than 2.4s, the premise was gone, and the model was deleted rather than kept as dead weight on "
+    "a 4GB card."))
+A(callout("<b>The pattern survived; the implementation didn't.</b> Gating retrieval on one closed "
+          "question took everyday conversation from leaking the novel 7 times out of 7 to 0, with "
+          "every real question still answerable. That is the same shape intent.py already proved. "
+          "What failed was the assumption underneath it — that a narrow job needs a small model — "
+          "and that assumption was only ever holding up a latency bug."))
+
+A(H2("Thinking somewhere else"))
+A(P("With the wiring fixed, what remained was the ceiling itself, and no amount of tuning reaches "
+    "past a 3B. So the conversation now goes to a hosted model and everything else stays here: "
+    "speech, embeddings, the library, memory, and every classifier. That last part is most of the "
+    "cost control — the judge runs on every single turn."))
+A(P("The measurement that matters is the one that inverted the reasoning that led here:"))
+A(bullets([
+    "local llama3.2:3b — <b>2.19s</b> a turn, free, offline, least capable",
+    "paid gpt-4o-mini — 2.51s, about $0.0001 a turn",
+    "a free model — 4.53s, no cost, rate limited",
+]))
+A(P("<b>Local is the fastest of the three.</b> The cloud is a quality trade and nothing else, which "
+    "was not true that morning and is entirely because of the two seconds above."))
+A(callout("<b>And the promise had to change with it.</b> The guide told people, in plain language, "
+          "that nothing they said ever left the computer. That is no longer true — the words of the "
+          "conversation go to a hosted model, though the audio, the memory and the documents do "
+          "not. A privacy claim that quietly stops being true is worse than never having made it, "
+          "so the guide now sets out what leaves and what stays, in a table, rather than "
+          "reassuring anyone."))
 
 A(H2("Not yet built"))
 A(bullets([

@@ -1,10 +1,15 @@
 # LIA — Locally Integrated Artificial Intelligence
 
-A companion that runs entirely on your machine. No accounts, no API keys, no
-network. Once the models are pulled, nothing she does leaves the laptop.
+A companion who lives on your machine. Her voice, her hearing, her memory and
+your documents are local. The **thinking** is not — the conversation goes to a
+hosted model, because the one thing a 4GB card can't fix is how capable the
+model is. See [What leaves the machine](#what-leaves-the-machine).
 
-Weather and online lookups were built, and are switched off rather than deleted
-— see [Offline, completely](#offline-completely).
+She falls back to the local model whenever the network isn't there, so a dropped
+connection costs cleverness rather than speech. `CLOUD_CHAT_ENABLED = False`
+puts her back to fully offline: faster, private, and noticeably less bright.
+
+Weather and online lookups are a separate thing, still switched off.
 
 ## Setup
 
@@ -176,12 +181,40 @@ things yourself if you want them converted.
 `.docx` is Word's current format only — not the old binary `.doc`, and not
 Kindle's `.mobi`/`.azw`. Converting those to `.epub` or `.docx` first works.
 
-## Offline, completely
+## What leaves the machine
 
-`INTERNET_ENABLED = False`. She makes no network call at all beyond talking to
-Ollama on your own machine.
+| stays here | goes to the hosted model |
+|---|---|
+| your audio — Whisper runs locally, nothing is uploaded | the text of your conversation |
+| everything she remembers about you | the last `CLOUD_HISTORY_TURNS` (4) turns |
+| your documents and the search over them | up to `CLOUD_LIBRARY_TOP_K` (2) passages, only when the judge says you asked about a document |
+| the judge, `intent.py`, fact extraction | — |
 
-Two things used to reach out, and both are switched off rather than deleted:
+Keeping the classifiers local is most of the cost control. The judge runs on
+every turn and `intent.py` whenever a phrase doesn't match; billing those would
+multiply the spend for work a 3B already does well. Only `chat_stream()` — what
+you actually say to her — leaves.
+
+**Measured, whole spoken turn:**
+
+```
+  local llama3.2:3b     2.19s    free, offline, least capable
+  gpt-4o-mini (paid)    2.51s    ~$0.0001/turn
+  gemma-4-26b (:free)   4.53s    free, rate limited
+```
+
+Local is the *fastest* of the three. The cloud is a quality trade and nothing
+else — which only became true once the `OLLAMA_URL` fix cut local first-token
+from 2.42s to 0.73s.
+
+A `:free` model is rate limited rather than billed, so expect the occasional
+429 and the occasional dropped stream. Both fall back to the local model and
+both say so in the log; a reply that stops mid-thought is otherwise a mystery.
+
+## Weather and lookups, still off
+
+Unrelated to the above, and unchanged. `INTERNET_ENABLED = False`. Two things
+used to reach out, and both are switched off rather than deleted:
 
 - **Weather** — needed no key. Open-Meteo, geolocated from your IP, answered in
   her own voice. `WEATHER_ENABLED = True` and `INTERNET_ENABLED = True` bring it
@@ -315,7 +348,8 @@ wrote about you.
 | `main.py` | the conversation loop |
 | `app.py` | tray app wrapper for running her in the background |
 | `library.py` | reads PDFs and notes you drop in `library/` |
-| `internet.py` | weather and online lookups — switched off, she is fully offline |
+| `internet.py` | weather and online lookups — still switched off |
+| `judge.py` | one closed question in front of the expensive work — "is this about a document?" |
 | `media.py` | system volume (Core Audio) |
 | `alarms.py` | spoken alarms and timers — regex-parsed, never guessed by the model |
 | `music.py` | her own music — files in `music/`, played by number |
@@ -338,6 +372,10 @@ wrote about you.
 | `WHISPER_MODEL` | `small.en` gets names right that `base.en` garbles |
 | `IDLE_MINUTES` | how long a silence ends the conversation |
 | `VOICE_ENGINE` | `"piper"` (default) / `"system"` for the built-in Windows voice |
+| `OLLAMA_URL` | **`127.0.0.1`, never `localhost`.** Ollama binds to IPv4; resolving `localhost` on Windows tries `::1` first and the failed attempt costs ~2s on *every* request. Measured 2.38s vs 0.35s — it was the largest single cost in a spoken turn. |
+| `CLOUD_CHAT_ENABLED` | off = fully local: faster, private, less capable |
+| `OPENROUTER_MODEL` | a `:free` suffix means rate limited rather than billed |
+| `JUDGE_ENABLED` | off = every turn searches the library again |
 | `RETRIEVAL_MIN_WORDS` | skips library lookup below this many words — raise it if short replies still feel slow |
 | `REMEMBER_CONVERSATION` | on: she stores and searches every turn again. Off by default — see [How she remembers](#how-she-remembers) |
 | `INTERNET_ENABLED` | on: weather and "look that up" come back — see [Offline, completely](#offline-completely) |

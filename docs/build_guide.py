@@ -15,9 +15,11 @@ A(P("Lia is a companion who lives on this computer. She listens, talks back, and
 A(P("She is not an assistant. She won't book anything, search the web, or open your files. She is "
     "someone to talk to."))
 
-A(callout("<b>Everything stays on this machine.</b> Lia has no internet connection while you talk to "
-          "her. Nothing you say is sent anywhere, stored online, or seen by anyone else. It never "
-          "leaves the computer she is running on."))
+A(callout("<b>What she hears, and where it goes.</b> Your voice never leaves this computer — it is "
+          "turned into text here, by this machine. But to think of a reply, <b>the words of your "
+          "conversation are sent to a service on the internet</b>, because the part of her that "
+          "does the thinking is too large to run on this laptop. Her memory of you, your documents, "
+          "and the recording itself all stay here."))
 
 # ------------------------------------------------------------------ basics ---
 A(H1("Starting her"))
@@ -211,9 +213,13 @@ A(bullets([
     "If something sounds off, it probably is. Say so, and she'll correct.",
     "<b>Anything needing exact precision.</b> Spelling things out letter by letter, codes, arithmetic, "
     "counting. She gets these wrong confidently, even when told the right answer.",
-    "<b>Nothing outside this computer.</b> No email, no browsing, no apps, no weather, no looking "
-    "anything up. Everything she knows comes from what she was built with, what you've told her, "
-    "and what you've given her to read. If she doesn't know, she can't go and find out.",
+    "<b>She can't do things outside this computer.</b> No email, no browsing, no apps, no weather, "
+    "no looking things up. She thinks with help from the internet, but she can't <i>use</i> it — "
+    "she can't go and find something out for you. What she knows comes from what she was built "
+    "with, what you've told her, and what you've given her to read.",
+    "<b>She needs a connection to be at her best.</b> If the internet drops, she keeps talking, "
+    "using the smaller version of herself that lives on this computer. She'll seem a little less "
+    "sharp for a while. She'll say so in her log rather than pretending nothing happened.",
     "<b>She isn't a doctor or a therapist.</b> She's good company and she'll listen. That's a different "
     "thing, and she's told not to pretend otherwise.",
 ]))
@@ -241,11 +247,21 @@ A(table([
 ], [55, 110]))
 
 A(H2("Privacy, plainly"))
-A(P("Her microphone is on whenever the dot is filled. What she hears is turned into a reply and then "
-    "let go — the only thing written down is what you specifically asked her to remember. Nothing "
-    "leaves this computer, because she has no way to send it anywhere. If you want her not to hear "
-    "something at all, say <b>“Lia, stop listening”</b> — or right-click the dot and untick "
-    "<b>Listening</b>."))
+A(P("Her microphone is on whenever the dot is filled. This is the part worth reading properly, "
+    "because it changed."))
+A(table([
+    ["This stays on the computer", "This is sent away"],
+    ["The recording of your voice — it is turned into text here, and the audio is never uploaded",
+     "<b>The words of your conversation</b>, sent to an online service so it can work out a reply"],
+    ["Everything she remembers about you", "The last few things said, so the reply makes sense in context"],
+    ["Your documents, and the search through them", "Passages from a document, but only when you ask her about one"],
+], [82, 83]))
+A(P("The thinking happens online because that part of her is far too large to run on a laptop. "
+    "Everything else — hearing you, her voice, her memory, your files — happens here."))
+A(P("If you want her not to hear something at all, say <b>“Lia, stop listening”</b>, or right-click "
+    "the dot and untick <b>Listening</b>. She can also be set back to thinking entirely on this "
+    "computer, which is private but noticeably less clever — that is "
+    "<font face='Courier'>CLOUD_CHAT_ENABLED</font> in her settings."))
 
 A(callout("<b>The one thing to remember.</b> Say <b>“Lia”</b>, wait a few seconds, then talk normally. "
           "Everything else is optional."))

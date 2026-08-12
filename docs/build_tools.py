@@ -240,10 +240,11 @@ A(P("<b>In Lia:</b> together they let the library folder accept whole novels, no
     "text files — added after a real book (a Harry Potter novel) turned out not to work yet. Each "
     "chapter is treated the same way a PDF page is: extracted, then chunked and embedded on its own."))
 
-A(callout("<b>The three services below are switched off.</b> Lia runs fully offline now — "
-          "<font face='Courier'>INTERNET_ENABLED = False</font>. The code is all still there and "
-          "unchanged, so they're kept here as a study reference and because one flag brings them "
-          "back. Nothing in this section runs as she's currently configured."))
+A(callout("<b>OpenRouter is now how she thinks; the other two are still off.</b> The conversation "
+          "goes to a hosted model, because model capability is the one thing a 4GB card cannot fix. "
+          "Everything else stays local — speech, embeddings, the library, memory, and every "
+          "classifier. Weather and “look that up” remain switched off "
+          "(<font face='Courier'>INTERNET_ENABLED = False</font>) and are unrelated to that."))
 
 A(H2("Groq"))
 A(P("A company that hosts open language models (like Meta's Llama family, at sizes far bigger than "
@@ -258,9 +259,18 @@ A(P("A single API that proxies requests to many different hosted models (OpenAI,
     "Google, Meta, and others) behind one key and one request format, billed per-use. Notably, "
     "appending <font face='Courier'>:online</font> to a model name makes OpenRouter run an actual "
     "web search before answering — genuinely current information, not a guess from training data."))
-A(P("<b>In Lia:</b> the preferred “look that up” provider when both keys are configured, "
-    "specifically because of that live-search mode — verified with a real, current, cited answer "
-    "(a 2025 sporting result) neither the local model nor a plain Groq call could have known."))
+A(P("<b>In Lia:</b> now the conversation itself. Only <font face='Courier'>chat_stream()</font> "
+    "goes out — the judge, intent.py and fact extraction stay on the local 3B, because they run on "
+    "every turn and billing them would multiply the spend for work a small model already does well."))
+A(P("Streamed rather than fetched whole, for the same reason the local path is: she starts speaking "
+    "her first sentence while the rest arrives. A model with a "
+    "<font face='Courier'>:free</font> suffix is rate limited rather than billed, so a 429 and the "
+    "occasional dropped connection are ordinary weather here — both fall back to the local model, "
+    "and both are announced rather than passed off as normal.", "LiaNote"))
+A(P("Worth recording, because it inverted an earlier conclusion: a whole spoken turn measures "
+    "2.19s on the local 3B, 2.51s on paid gpt-4o-mini, and 4.53s on a free model. <b>Local is the "
+    "fastest of the three.</b> The cloud buys capability, not speed — which only became true after "
+    "the OLLAMA_URL fix cut local first-token from 2.42s to 0.73s.", "LiaNote"))
 
 A(H2("Open-Meteo"))
 A(P("A free weather API that needs no signup or key at all — just a latitude/longitude and it "

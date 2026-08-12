@@ -1,7 +1,13 @@
 # LIA — Locally Integrated Artificial Intelligence
 
-A companion that runs entirely on your machine. No API keys, no accounts, no
-network. Once the models are pulled, nothing she does leaves the laptop.
+A companion who lives on your machine. Her voice, her hearing, her memory and
+your documents are all local. The **thinking** is not: the conversation goes to
+a hosted model, because the one thing a 4GB card can't fix is how capable the
+model is.
+
+She falls back to a local model whenever the network isn't there, so losing the
+connection costs cleverness, not speech. Set `CLOUD_CHAT_ENABLED = False` and
+she runs entirely offline again — faster, private, and noticeably less bright.
 
 This page is the short version. [`LIA/README.md`](LIA/README.md) is the full
 reference — every feature, and the reasoning behind the choices.
@@ -121,15 +127,46 @@ python LIA\main.py --no-save
 Nothing reaches the database. Alarms are the deliberate exception: those are an
 action you asked for, not history she wrote about you.
 
-## Offline, completely
+## What leaves the machine, and what doesn't
 
-`INTERNET_ENABLED = False`. She makes no network calls at all beyond Ollama on
-your own machine.
+| stays here | goes to the hosted model |
+|---|---|
+| your audio — Whisper runs locally, the recording is never uploaded | the text of your conversation |
+| everything she remembers about you | the last 4 turns, so a reply makes sense |
+| your documents, and the search over them | up to 2 matched passages, and only when the judge says you asked about one |
+| every classifier — the judge, `intent.py`, fact extraction | — |
 
-Weather and "look that up" were built and are still in `internet.py`, switched
-off rather than deleted — weather needed no key, lookups needed a Groq or
-OpenRouter one. Set `INTERNET_ENABLED = True` (and `WEATHER_ENABLED = True`) to
-bring them back.
+Keeping the classifiers local is most of the cost control: the judge runs on
+*every* turn, so billing it would multiply the spend for work a 3B does well.
+
+Set `CLOUD_CHAT_ENABLED = False` to go back to fully local.
+
+**Weather and "look that up"** remain switched off (`INTERNET_ENABLED = False`)
+and are unrelated to the above — they're still in `internet.py`, waiting on a
+flag.
+
+### Cost and speed, measured
+
+```
+whole spoken turn      to first word
+  local llama3.2:3b        2.19s     free, offline, least capable
+  gpt-4o-mini (paid)       2.51s     ~$0.0001/turn
+  gemma-4-26b (:free)      4.53s     free, rate limited
+```
+
+**Local is the fastest of the three.** The cloud is a quality trade, not a speed
+one — that only became true after the `OLLAMA_URL` fix below cut local
+first-token from 2.42s to 0.73s.
+
+Models with a `:free` suffix are rate limited rather than billed. A 429 or a
+dropped stream falls back to the local model; both are announced in the log
+rather than passed off as normal.
+
+Set the key in the environment, never in a file:
+
+```powershell
+[Environment]::SetEnvironmentVariable('OPENROUTER_API_KEY', 'your-key', 'User')
+```
 
 ## The files
 
@@ -155,6 +192,10 @@ bring them back.
 
 | setting | when to change it |
 |---|---|
+| `OLLAMA_URL` | **must be `127.0.0.1`, never `localhost`.** Ollama binds to IPv4; resolving `localhost` on Windows tries `::1` first and the failed attempt costs ~2s on *every* request. Measured: 2.38s vs 0.35s. |
+| `CLOUD_CHAT_ENABLED` | off = fully local, faster, private, less capable |
+| `CLOUD_HISTORY_TURNS` / `CLOUD_LIBRARY_TOP_K` | how much context a billed turn carries — the spend is in what's sent, not what returns |
+| `JUDGE_ENABLED` | off = every turn searches your library again, which put 500 tokens of novel in front of "how was your day" |
 | `NUM_CTX` | 8192 keeps her mostly on the GPU on a 4GB card. Ollama's 32k default spills 63% to CPU. Check with `ollama ps`. |
 | `OLLAMA_KEEP_ALIVE` | `"30m"` avoids a 9s cold start; costs ~3.7GB of VRAM held. Lower it on battery. |
 | `VAD_SILENCE_SECONDS` | raise if she cuts you off mid-thought |
