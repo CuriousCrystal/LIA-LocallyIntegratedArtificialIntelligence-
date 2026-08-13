@@ -449,13 +449,20 @@ def handle_command(cmd: str, speaker: voice.Speaker, state: dict) -> bool:
             print("[wake word off -- she answers anything she hears]\n")
 
     elif name == "/whoami":
+        # Reachable by voice now too (see SPOKEN_COMMANDS), which is exactly
+        # why every branch below speaks, not just prints -- the tray app has
+        # no console for the print to reach. "forget" stays typed-only on
+        # purpose: it's not a phrase in SPOKEN_COMMANDS, so it can never
+        # arrive here from something merely overheard.
         if arg == "forget":
             speaker_id.forget_profile()
             print("[voice profile cleared -- say \"it's Wade\" a few times to re-enroll]\n")
         elif not speaker_id.available():
             print("[voice recognition isn't available -- see LIA/speaker_id.py]\n")
+            speaker.say("I don't have voice recognition set up on this machine.")
         elif not speaker_id.is_enrolled():
             print("[no voice enrolled yet -- say \"Lia, it's Wade\" a few times]\n")
+            speaker.say("I don't have your voice enrolled yet. Say \"it's Wade\" a few times and I will.")
         else:
             progress = speaker_id.enrollment_progress()
             score = state.get("voice_score")
@@ -463,6 +470,45 @@ def handle_command(cmd: str, speaker: voice.Speaker, state: dict) -> bool:
             print(f"[voice profile: {progress} sample(s) folded in, "
                   f"threshold={speaker_id.SPEAKER_MATCH_THRESHOLD}, last score={score_text}]")
             print("  \"/whoami forget\" clears the profile and starts over\n")
+            # A number read aloud ("zero point eight four") isn't an answer to
+            # "is that me" -- so speak the comparison against the threshold
+            # that already decides it, not the raw score.
+            if score is not None and score >= speaker_id.SPEAKER_MATCH_THRESHOLD:
+                speaker.say("Yes, that sounds like you.")
+            elif score is not None:
+                speaker.say("That doesn't quite sound like your enrolled voice.")
+            else:
+                speaker.say(f"I have your voice enrolled, {progress} samples in, "
+                            "but no fresh reading this turn to check against.")
+
+    elif name == "/note":
+        notes = list_notes()
+        if arg in ("list", ""):
+            if not notes:
+                print("[no notes yet -- try \"remember that ...\"]\n")
+                speaker.say("I don't have any notes yet. Say \"remember that\" and something, and I will.")
+            else:
+                print("[notes]")
+                for i, _key, value in notes:
+                    print(f"  {i}. {value}")
+                print("  \"forget number 2\" removes one\n")
+                spoken_list = "; ".join(f"{i}, {value}" for i, _key, value in notes)
+                speaker.say(f"I've got {len(notes)}: {spoken_list}.")
+            return True
+
+        # Otherwise arg is a position, from forget_request() in as_instruction.
+        try:
+            position = int(arg)
+        except ValueError:
+            print(f"[not sure which note that is -- try \"/note list\"]\n")
+            return True
+        forgotten = forget_note(position)
+        if forgotten is None:
+            print(f"[no note at position {position}]\n")
+            speaker.say(f"I don't have a note {position} -- want me to list them?")
+        else:
+            print(f"[forgot: {forgotten}]\n")
+            speaker.say(f"Forgot it -- {forgotten}.")
 
     elif name == "/alarms":
         if arg == "cancel":
@@ -809,6 +855,32 @@ def remember_explicitly(text: str) -> str | None:
     return f"Got it -- I'll remember{joiner} {note}."
 
 
+def list_notes() -> list[tuple[int, str, str]]:
+    """Every note_N fact, numbered 1..N by position -- not by the key's own
+    numeric suffix, which has gaps once anything's been forgotten.
+
+    Same guarantee as music.tracks(): stable between "list your notes" and
+    "forget number 2" as long as nothing's added or removed in between, same
+    as track numbers are stable "as long as the files don't change" (see
+    music.py). Not a database ID -- purely what gets read aloud.
+    """
+    existing = db.get_all_facts()
+    notes = [(k, v) for k, v in existing.items()
+             if k.startswith("note_") and k.split("_")[-1].isdigit()]
+    notes.sort(key=lambda kv: int(kv[0].split("_")[1]))
+    return [(i, k, v) for i, (k, v) in enumerate(notes, start=1)]
+
+
+def forget_note(position: int) -> str | None:
+    """Delete the note at this spoken position. Returns what was forgotten,
+    or None if there's nothing at that position."""
+    for i, key, value in list_notes():
+        if i == position:
+            db.delete_fact(key)
+            return value
+    return None
+
+
 def claims_identity(text: str) -> bool:
     """Does this sound like them confirming who they are -- "it's Wade"?
 
@@ -898,6 +970,25 @@ def track_request(text: str) -> int | None:
     return int(token) if token.isdigit() else _SPOKEN_NUMBERS.get(token)
 
 
+# "forget number 2", "forget note two", "forget the second one" -- same
+# numbered-position idea as track_request above, reused rather than a new
+# fuzzy-match scheme: the list is short and the number IS the disambiguation.
+_FORGET_NUMBER = re.compile(
+    r"\bforget\s+(?:the\s+)?(?:note|number|no\.?)?\s*"
+    r"([0-9]+|" + "|".join(_SPOKEN_NUMBERS) + r")\b",
+    re.IGNORECASE,
+)
+
+
+def forget_request(text: str) -> int | None:
+    """Which numbered note they asked to forget, if any."""
+    match = _FORGET_NUMBER.search(text)
+    if not match:
+        return None
+    token = match.group(1).lower()
+    return int(token) if token.isdigit() else _SPOKEN_NUMBERS.get(token)
+
+
 def as_instruction(text: str) -> str:
     """Turn a spoken instruction into its command form, if it is one.
 
@@ -924,6 +1015,15 @@ def as_instruction(text: str) -> str:
     if number is not None:
         intent.log_matched(text, f"/track {number}")
         return f"/track {number}"
+
+    # Same reasoning, same fix: "forget number 2" has no phrase in
+    # SPOKEN_COMMANDS to match (there's no wildcard in a phrase list), so it
+    # needs to be parsed before that matcher runs rather than falling through
+    # past it to intent.py, which has no notion of "which position".
+    forget_number = forget_request(text)
+    if forget_number is not None:
+        intent.log_matched(text, f"/note {forget_number}")
+        return f"/note {forget_number}"
 
     matched = spoken_command(text)
     if matched:

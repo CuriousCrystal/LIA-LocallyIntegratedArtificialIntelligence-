@@ -110,6 +110,20 @@ def get_all_facts() -> dict:
     return {row["key"]: row["value"] for row in rows}
 
 
+def delete_fact(key: str) -> bool:
+    """Forget one fact -- a single note, say, rather than everything.
+
+    The only DELETE in this file. Returns whether a row actually existed to
+    remove, so a caller can tell "forgot it" from "there was nothing there".
+    """
+    conn = get_conn()
+    cur = conn.execute("DELETE FROM facts WHERE key = ?", (key,))
+    conn.commit()
+    removed = cur.rowcount > 0
+    conn.close()
+    return removed
+
+
 def insert_memory(session_id: str, role: str, content: str, embedding: list[float]):
     conn = get_conn()
     conn.execute(

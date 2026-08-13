@@ -118,6 +118,9 @@ Set `BARGE_IN = False` to go back to letting her finish.
 "Lia, start listening"  /  "wake up"          → mic on
 "Lia, be quiet"         /  "stop talking"     → voice off
 "Lia, you can talk"                           → voice on
+"do you know my voice"  /  "is that me"       → speaks her voice-ID status
+"what have you remembered"                    → reads back your notes, numbered
+"forget number 2"                             → deletes that one note
 ```
 
 Edit `SPOKEN_COMMANDS` in `config.py` to add your own phrasings.
@@ -211,6 +214,13 @@ A `:free` model is rate limited rather than billed, so expect the occasional
 429 and the occasional dropped stream. Both fall back to the local model and
 both say so in the log; a reply that stops mid-thought is otherwise a mystery.
 
+That table above is one afternoon's measurement, and free-tier reliability
+isn't something one session can answer. Every fallback — rate limited, or
+dropped mid-stream — is also recorded to `cloud_fallback_log.jsonl`
+(`CLOUD_FALLBACK_LOG` in `config.py`). Run `python LIA\fallback_report.py`
+after a week of real use to see how often it's actually happening before
+deciding whether `:free` is worth staying on.
+
 ## Weather and lookups, still off
 
 Unrelated to the above, and unchanged. `INTERNET_ENABLED = False`. Two things
@@ -275,7 +285,11 @@ won't use your name and won't share what she remembers about you, but she never
 simply refuses to talk.
 
 `/whoami` shows enrollment progress and the last confidence score; `/whoami forget`
-clears the profile and starts over. **Real-world accuracy is unverified from
+clears the profile and starts over. Ask out loud too — "do you know my voice",
+"is that me" — and she answers the same thing spoken, which matters in the tray
+app, where there's no console for `/whoami` to print to. "Forget" stays
+typed-only on purpose: it isn't a phrase in `SPOKEN_COMMANDS`, so a profile
+can't be cleared by anything merely overheard. **Real-world accuracy is unverified from
 development** — it was only tested against synthetic TTS voices, which likely
 *understates* how well it discriminates real human voices (see
 `speaker_id.py`'s docstring). `SPEAKER_MATCH_THRESHOLD` in `config.py` is a
@@ -315,6 +329,12 @@ nothing marking it as a guess. Turn any of them back on if you'd rather have it.
 
 Telling her the same thing twice doesn't store it twice — she says she already
 has it.
+
+**Forgetting one note** works the same way picking a track does: "what have
+you remembered" reads every note back, numbered, and "forget number 2" removes
+just that one. The number is a position in that list, not a database ID, so
+it's only stable between a listing and the forget that follows it — same
+guarantee `music.py`'s track numbers give.
 
 What's left in `lia_memory.db` (plain SQLite — inspect it any time with
 `sqlite3 lia_memory.db`) is **facts**: your name, plus the notes you explicitly
@@ -383,7 +403,8 @@ wrote about you.
 ## Not built yet
 
 - Merging duplicate facts (`sister_name` and `visiting_sister_name` both exist)
-- Any way to make her forget a single note
+  — only reachable through `AUTO_EXTRACT_FACTS`, which is off, so this is
+  dormant rather than a live gap. Revisit if that flag comes back on.
 - OCR, so scanned PDFs stay unreadable
 - Voice cloning from a short recording — see [`voices/README.md`](voices/README.md#cloning-a-specific-persons-voice)
 - Music playback control on anything but Windows

@@ -2,6 +2,7 @@ import json
 import subprocess
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 
 import requests
@@ -53,11 +54,34 @@ def wait_until_ready(total_seconds: float = 180, try_launch: bool = True) -> boo
 
 from config import (
     OLLAMA_URL, MODEL_CHAT, MODEL_EMBED, OLLAMA_KEEP_ALIVE, NUM_CTX,
-    CLOUD_CHAT_ENABLED, CLOUD_MAX_TOKENS, CLOUD_LOG_USAGE,
-    OPENROUTER_API_KEY, OPENROUTER_MODEL,
+    CLOUD_CHAT_ENABLED, CLOUD_MAX_TOKENS, CLOUD_LOG_USAGE, CLOUD_FALLBACK_LOG,
+    OPENROUTER_API_KEY, OPENROUTER_MODEL, DATA_DIR,
 )
 
 OPTIONS = {"num_ctx": NUM_CTX}
+
+# Every cloud fallback, appended as one JSON object per line -- same shape and
+# same reasoning as intent.py's intent_log.jsonl. `lia.log` already shows each
+# one as it happens, but as prose with no timestamp; this is what a "how often
+# does this actually happen" question needs to be answered from data instead
+# of a guess.
+_FALLBACK_LOG_PATH = DATA_DIR / "cloud_fallback_log.jsonl"
+
+
+def _log_fallback(reason: str, mid_stream: bool):
+    if not CLOUD_FALLBACK_LOG:
+        return
+    try:
+        _FALLBACK_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(_FALLBACK_LOG_PATH, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps({
+                "at": datetime.now().isoformat(timespec="seconds"),
+                "reason": reason,
+                "mid_stream": mid_stream,
+                "model": OPENROUTER_MODEL,
+            }, ensure_ascii=False) + "\n")
+    except Exception:
+        pass  # logging must never be the reason a turn fails
 
 
 def chat(messages: list[dict], json_mode: bool = False,
@@ -216,11 +240,13 @@ def chat_stream(messages: list[dict]):
                 # so let it stand -- but say so, because a reply that simply
                 # stops mid-thought is otherwise a mystery. Seen for real: a
                 # free provider dropped the connection mid-stream.
+                _log_fallback(type(exc).__name__, mid_stream=True)
                 print("\n[cloud stream dropped -- that reply may be cut short]",
                       flush=True)
                 return
             why = ("rate limited" if isinstance(exc, RateLimited)
                    else type(exc).__name__)
+            _log_fallback(why, mid_stream=False)
             print(f"\n[cloud unavailable ({why}) -- answering locally]", flush=True)
 
     resp = requests.post(

@@ -267,6 +267,15 @@ CLOUD_MAX_TOKENS = 250
 # while it is happening rather than at the end of the month.
 CLOUD_LOG_USAGE = True
 
+# Record every cloud fallback -- rate limited, or dropped mid-stream -- to
+# cloud_fallback_log.jsonl, one JSON object per line. `lia.log` already shows
+# each one as it happens, but as prose with no timestamp, so "how often is
+# this actually happening" could only ever be a guess. This is the same
+# reasoning as INTENT_LOG: a free model was chosen on one afternoon's
+# measurement, and whether that was the right call is a question a week of
+# real data can answer and a single session can't.
+CLOUD_FALLBACK_LOG = True
+
 # Say any of these and, if she's online, she answers from a real search
 # (OpenRouter's :online mode, or Groq as a fallback) instead of guessing from
 # what a 3B local model already knows.
@@ -535,6 +544,15 @@ SPOKEN_COMMANDS = {
         "how loud is it", "current volume", "check the volume",
         "what is the volume right now", "how loud is the volume",
     ],
+    # Voice-ID status, out loud -- previously only reachable by typing
+    # "/whoami" in a console, which the tray app (no console) never has.
+    # Deliberately status only: "/whoami forget" clears the enrolled profile
+    # and stays typed-only, so anyone within earshot can't wipe it by saying
+    # a phrase.
+    "/whoami": [
+        "do you know my voice", "do you recognize my voice", "do you recognize me",
+        "is that me", "is this my voice", "does my voice match", "do you know it's me",
+    ],
     # Her own music, by position: "play number one", "play song 3". Kept apart
     # from /media play, which only resumes whatever another app already has
     # loaded and can't start anything.
@@ -557,6 +575,14 @@ SPOKEN_COMMANDS = {
         "read my files", "read my file", "read the file", "read the pdf",
         "read my pdf", "read the new file", "read the new pdf",
         "check the library", "read the document",
+    ],
+    # Reads back what "remember that ..." has stored, numbered so a follow-up
+    # "forget number 2" (parsed separately -- see forget_request in main.py,
+    # there's no wildcard in a phrase list) knows what position means.
+    "/note list": [
+        "what have you remembered", "what do you remember", "what do you remember about me",
+        "what notes do you have", "list your notes", "list my notes",
+        "what have i told you to remember", "read back my notes",
     ],
 }
 
