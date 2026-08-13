@@ -229,6 +229,79 @@ OPENROUTER_MODEL = "google/gemma-4-26b-a4b-it:free"
 OPENROUTER_ONLINE = True
 
 
+# --- asking other models by name ---
+# A second, separate path to the cloud: not the conversation itself, but a
+# named model consulted on request -- "Lia, ask dog for a suggestion." Off
+# would match weather and lookups, but this one is on by default because it
+# was asked for, not despite that.
+ASK_AGENT_ENABLED = True
+
+# Every entry is ":free" on purpose, same trade as OPENROUTER_MODEL above:
+# rate limited rather than billed. Sized deliberately light too -- these are
+# consulted on request, mid-conversation, so what's measured is *total* time
+# to a complete reply, not time to first word. ask_agent() (llm.py) collects
+# the whole answer before she says any of it -- unlike her own replies, there
+# is no sentence-by-sentence streaming to hide behind here, so first-word
+# latency (the number OPENROUTER_MODEL's own comment uses, correctly, for
+# that streamed path) would have been the wrong thing to optimise for on this
+# one:
+#
+#   dog   nvidia/nemotron-nano-12b-v2-vl:free  ~1-2s typical, clean -- fastest tried, despite being a vision model
+#   cat   nvidia/nemotron-3-nano-30b-a3b:free  ~2s typical, clean
+#   fox   poolside/laguna-s-2.1:free           ~2s typical, clean
+#
+# First pick had dog on google/gemma-4-26b-a4b-it:free (5.26s) -- correctly
+# answered, just heavier than a job this narrow needs. Swapped for the
+# lighter one above once that was noticed.
+#
+# A fourth slot (owl) was tried and dropped rather than kept as the weak
+# link: openai/gpt-oss-20b:free worked but was slow (6.91s); the lighter
+# replacement, nvidia/nemotron-nano-9b-v2:free, measured well once (3.08s)
+# then failed empty 5/5 on a re-test minutes later -- currently degraded, not
+# a fluke; cohere/north-mini-code:free was the one alternative that kept
+# answering, but at 5-9s it wasn't actually lighter than what it replaced.
+# Three reliable, genuinely fast agents beat four with a weak one -- add a
+# fourth back if OpenRouter's free catalog turns up something both light and
+# consistent.
+#
+# The remaining cost: all three are now NVIDIA Nemotron/Poolside rather than
+# spanning more vendors, since speed was the actual ask and those kept
+# winning on it.
+#
+# Rejected outright, tried across two rounds of testing: nemotron-3.5-lightning
+# answers with its raw chain-of-thought instead of a reply ("Here's a
+# thinking process: 1...."); nemotron-3-nano-omni-30b-a3b-reasoning currently
+# 400s ("DEGRADED function"); liquid/lfm-2.5-2.6b and poolside/laguna-xs-2.1
+# both streamed back nothing, twice each, not just transient;
+# inclusionai/ling-3.0-tiny returned "model not available". Re-run the same
+# measurement before swapping any of these -- free-tier availability changes
+# on OpenRouter's side, not just this file's.
+AGENTS = {
+    "dog": "nvidia/nemotron-nano-12b-v2-vl:free",
+    "cat": "nvidia/nemotron-3-nano-30b-a3b:free",
+    "fox": "poolside/laguna-s-2.1:free",
+}
+
+# She speaks the answer, so this is a ceiling against a runaway reply, not a
+# target -- same reasoning as CLOUD_MAX_TOKENS.
+AGENT_MAX_TOKENS = 150
+
+# A hard wall-clock ceiling on one ask, enforced inside the read loop itself
+# (see llm.ask_agent), not just passed to requests.post as a timeout.
+# requests' timeout, on a streamed response, only bounds the *gap* between
+# chunks -- not the total call -- so a provider trickling data slowly can run
+# far past it without ever tripping it. Found for real: nemotron-nano-12b-v2
+# -- normally ~1.5s -- once took 121s and still came back empty, well past
+# the 30s per-chunk timeout that never fired because no single gap was that
+# long. All four AGENTS normally answer in 1-3s total; anything past this is
+# treated as a failure, not patience.
+AGENT_TIMEOUT_SECONDS = 15
+
+ASK_AGENT_SYSTEM_PROMPT = """Answer directly and briefly -- a sentence or two at
+most. No preamble, no markdown, no bullet points or headers. What you write
+will be read aloud exactly as you write it, to someone who can't see text."""
+
+
 # --- cloud chat ---
 # The conversation itself goes to a hosted model instead of the local 3B, which
 # is the one thing local hardware cannot fix. Everything else stays here:
@@ -583,6 +656,15 @@ SPOKEN_COMMANDS = {
         "what have you remembered", "what do you remember", "what do you remember about me",
         "what notes do you have", "list your notes", "list my notes",
         "what have i told you to remember", "read back my notes",
+    ],
+    # Discoverability for AGENTS, matching every other listable thing she has.
+    # "ask dog for ..." itself isn't a phrase here -- it carries free text
+    # after the name, which no entry in this dict can capture (see
+    # ask_agent_request in main.py, parsed the same way track/note numbers are).
+    "/agents": [
+        "who can you ask", "what agents do you have", "who else can you ask",
+        "who can you consult", "list your agents", "what other ai can you ask",
+        "who are your agents",
     ],
 }
 

@@ -56,6 +56,7 @@ from config import (
     OLLAMA_URL, MODEL_CHAT, MODEL_EMBED, OLLAMA_KEEP_ALIVE, NUM_CTX,
     CLOUD_CHAT_ENABLED, CLOUD_MAX_TOKENS, CLOUD_LOG_USAGE, CLOUD_FALLBACK_LOG,
     OPENROUTER_API_KEY, OPENROUTER_MODEL, DATA_DIR,
+    AGENT_MAX_TOKENS, ASK_AGENT_SYSTEM_PROMPT, AGENT_TIMEOUT_SECONDS,
 )
 
 OPTIONS = {"num_ctx": NUM_CTX}
@@ -214,6 +215,81 @@ def _cloud_stream(messages: list[dict]):
         # An empty 200 is not a reply. Raise so the caller falls back to the
         # local model rather than leaving her silent.
         raise RuntimeError("cloud returned no content")
+
+
+def ask_agent(model: str, query: str) -> str:
+    """One question to a specific OpenRouter model, by name, collected whole.
+
+    Used for "ask dog/cat/fox" (see AGENTS in config.py) -- she has to
+    have the entire answer before she can relay it, so nothing is lost by not
+    yielding pieces the way chat_stream does for her own replies.
+
+    Still requested with stream=True and assembled here rather than as a
+    single non-streaming call: that's the exact request shape already proven
+    against OpenRouter (see _cloud_stream), including against these specific
+    free models when they were measured for config.py's AGENTS comment. A
+    non-streaming request was never tested against them.
+
+    Raises RateLimited on a 429, TimeoutError past AGENT_TIMEOUT_SECONDS, and
+    RuntimeError on an empty reply -- same vocabulary chat_stream already
+    uses, since a free model is a free model whichever one was asked.
+    """
+    deadline = time.monotonic() + AGENT_TIMEOUT_SECONDS
+    resp = requests.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "HTTP-Referer": "https://github.com/lia-companion",
+            "X-Title": "Lia",
+        },
+        json={
+            "model": model,
+            "messages": [
+                {"role": "system", "content": ASK_AGENT_SYSTEM_PROMPT},
+                {"role": "user", "content": query},
+            ],
+            "stream": True,
+            "max_tokens": AGENT_MAX_TOKENS,
+        },
+        timeout=AGENT_TIMEOUT_SECONDS,
+        stream=True,
+    )
+    if resp.status_code == 429:
+        raise RateLimited(f"{model} is rate limited right now")
+    resp.raise_for_status()
+
+    # requests' own timeout only bounds the *gap* between chunks on a
+    # streamed response, not the total call -- a provider trickling data
+    # slowly can run well past it without ever tripping it (measured: 121s,
+    # still empty, against nemotron-nano-12b-v2 which normally answers in
+    # ~1.5s). Enforced again here, against wall-clock time across the whole
+    # read, so a slow provider is a fast failure instead of a long one.
+    pieces = []
+    for raw in resp.iter_lines():
+        if time.monotonic() > deadline:
+            resp.close()
+            raise TimeoutError(f"{model} took longer than {AGENT_TIMEOUT_SECONDS}s")
+        if not raw:
+            continue
+        line = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
+        if not line.startswith("data: "):
+            continue
+        body = line[6:].strip()
+        if body == "[DONE]":
+            break
+        try:
+            chunk = json.loads(body)
+        except ValueError:
+            continue
+        for choice in chunk.get("choices", []):
+            piece = (choice.get("delta") or {}).get("content") or ""
+            if piece:
+                pieces.append(piece)
+
+    text = "".join(pieces).strip()
+    if not text:
+        raise RuntimeError(f"{model} returned an empty reply")
+    return text
 
 
 def chat_stream(messages: list[dict]):

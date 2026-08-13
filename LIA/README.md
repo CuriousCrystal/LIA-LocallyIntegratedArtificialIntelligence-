@@ -121,6 +121,8 @@ Set `BARGE_IN = False` to go back to letting her finish.
 "do you know my voice"  /  "is that me"       → speaks her voice-ID status
 "what have you remembered"                    → reads back your notes, numbered
 "forget number 2"                             → deletes that one note
+"ask dog for a suggestion on X"               → a second opinion from a named model
+"who can you ask"                             → lists who's available
 ```
 
 Edit `SPOKEN_COMMANDS` in `config.py` to add your own phrasings.
@@ -220,6 +222,56 @@ dropped mid-stream — is also recorded to `cloud_fallback_log.jsonl`
 (`CLOUD_FALLBACK_LOG` in `config.py`). Run `python LIA\fallback_report.py`
 after a week of real use to see how often it's actually happening before
 deciding whether `:free` is worth staying on.
+
+## Asking someone else
+
+A second, separate cloud path — not the conversation itself, but a *named*
+model, consulted on request:
+
+```
+"Lia, ask dog for a suggestion on remembering to drink water"
+"ask cat what she thinks about this"
+"who can you ask"                     → lists who's available
+```
+
+Three names, each a light, fast free-tier model on OpenRouter (`AGENTS` in
+`config.py`):
+
+| name | model | typical total time |
+|---|---|---|
+| `dog` | `nvidia/nemotron-nano-12b-v2-vl:free` | ~1–2s |
+| `cat` | `nvidia/nemotron-3-nano-30b-a3b:free` | ~2s |
+| `fox` | `poolside/laguna-s-2.1:free` | ~2s |
+
+She relays the answer attributed — *"Dog says: ..."* — the same way she
+cites a library passage rather than folding it into her own words. It's a
+real second network call on top of her own reply, so like weather and
+lookups, it only happens when asked by name, never automatically. A rate
+limit, timeout, or empty reply gets said plainly ("Dog's rate limited right
+now") rather than silence — and every call is capped at `AGENT_TIMEOUT_SECONDS`
+(15s) regardless of what the model does, after one was measured hanging for
+121s and still coming back empty.
+
+Picked light on purpose, and measured on *total* time rather than time to
+first word: `ask_agent()` collects the whole reply before she says any of
+it, so unlike her own streamed replies, there's no first sentence to hide the
+rest of the wait behind. The first pick for `dog` was
+`google/gemma-4-26b-a4b-it:free` — answered correctly, just took 5.3s total,
+heavier than a "second opinion" needs to be.
+
+A fourth was tried and dropped rather than kept as the weak link. Every
+lighter option for it either failed outright or turned out unreliable —
+worked once, then failed empty five times in a row on a re-test — and the
+one alternative that kept answering wasn't actually any lighter than what it
+would have replaced. Three fast, genuinely reliable agents beat four with a
+shaky one; a fourth can come back if something both light and consistent
+turns up.
+
+All three are `:free`, so this costs nothing to use — but free-tier
+availability on OpenRouter's side changes over time and isn't always stable
+run to run. Re-measure before swapping any of `AGENTS` — the comment above
+it in `config.py` shows how, including *what* to measure: total time, not
+first word, for this path specifically.
 
 ## Weather and lookups, still off
 

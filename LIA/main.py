@@ -82,6 +82,8 @@ from config import (
     LIBRARY_TOP_K,
     CLOUD_HISTORY_TURNS,
     CLOUD_LIBRARY_TOP_K,
+    AGENTS,
+    ASK_AGENT_ENABLED,
 )
 
 HELP = """
@@ -92,6 +94,9 @@ HELP = """
   /track [n|name|list|stop]         play her own music from LIA/music/
   /volume up|down|mute|unmute       adjust the system volume
   /whoami [forget]                  voice-recognition status, or clear enrollment
+  /note [list|forget <n>]           what she's been told to remember, or forget one
+  /agents                           who else she can ask (see AGENTS in config.py)
+  /ask <name> <question>            ask one of them -- e.g. /ask dog what's for dinner
   /alarms [cancel]                  list pending alarms/timers, or clear them
   /library [scan] what she has read; 'scan' picks up new files
   /voices         list voices found in LIA/voices/
@@ -404,8 +409,52 @@ _GATED_ACTIONS = {
 }
 
 
+def handle_ask_agent(rest: str, speaker: voice.Speaker) -> bool:
+    """Handles "/ask <name> <query>" -- split out from handle_command's usual
+    name/arg dispatch because the query is free text, not a single word, and
+    nothing else here needs that shape."""
+    parts = rest.split(maxsplit=1)
+    name = parts[0] if parts else ""
+    query = parts[1] if len(parts) > 1 else ""
+
+    if name not in AGENTS:
+        print(f"[no agent called \"{name}\" -- I know: {', '.join(AGENTS)}]\n")
+        speaker.say(f"I don't have anyone called {name}. I can ask {', '.join(AGENTS)}.")
+        return True
+
+    if not query:
+        print(f"[ask {name} what?]\n")
+        speaker.say(f"What should I ask {name}?")
+        return True
+
+    model = AGENTS[name]
+    print(f"[asking {name} ({model})...]")
+    status(f"asking {name}")
+    try:
+        answer = llm.ask_agent(model, query)
+    except llm.RateLimited:
+        print(f"[{name} is rate limited right now]\n")
+        speaker.say(f"{name.capitalize()} is rate limited right now -- try again in a bit.")
+        return True
+    except Exception as exc:
+        print(f"[couldn't reach {name}: {type(exc).__name__}: {exc}]\n")
+        speaker.say(f"I couldn't reach {name} just now.")
+        return True
+    finally:
+        clear_status()
+
+    print(f"LIA ({name}): {answer}\n")
+    speaker.say(f"{name.capitalize()} says: {answer}")
+    return True
+
+
 def handle_command(cmd: str, speaker: voice.Speaker, state: dict) -> bool:
     """Returns True if the input was a command and has been handled."""
+    if cmd.startswith("/ask "):
+        # Free-text payload -- doesn't fit the single-word name/arg split two
+        # lines down, so it's handled before that split ever runs.
+        return handle_ask_agent(cmd[len("/ask "):], speaker)
+
     parts = cmd.lower().split()
     if not parts or not parts[0].startswith("/"):
         return False
@@ -509,6 +558,19 @@ def handle_command(cmd: str, speaker: voice.Speaker, state: dict) -> bool:
         else:
             print(f"[forgot: {forgotten}]\n")
             speaker.say(f"Forgot it -- {forgotten}.")
+
+    elif name == "/agents":
+        if not ASK_AGENT_ENABLED or not AGENTS:
+            print("[no agents configured -- see AGENTS in config.py]\n")
+            speaker.say("I don't have anyone else set up to ask right now.")
+        else:
+            print("[you can ask]")
+            for n, m in AGENTS.items():
+                print(f"  - {n} ({m})")
+            print("  \"ask dog for ...\" (or whichever one) asks them\n")
+            names = ", ".join(AGENTS)
+            speaker.say(f"I can ask {names} for a second opinion -- just say, "
+                        f"ask {next(iter(AGENTS))} for, and whatever you want to know.")
 
     elif name == "/alarms":
         if arg == "cancel":
@@ -989,6 +1051,35 @@ def forget_request(text: str) -> int | None:
     return int(token) if token.isdigit() else _SPOKEN_NUMBERS.get(token)
 
 
+# "ask dog for a suggestion on X", "ask cat what she thinks" -- a fixed,
+# small vocabulary of names (see AGENTS in config.py), same shape as the
+# number-capture above, except what follows the name is free text, not a
+# position, so it's captured whole rather than mapped through _SPOKEN_NUMBERS.
+_ASK_AGENT = re.compile(
+    r"\bask\s+(" + "|".join(re.escape(n) for n in AGENTS) + r")\b[,:]?\s*(.*)",
+    re.IGNORECASE,
+)
+
+
+def ask_agent_request(text: str) -> tuple[str, str] | None:
+    """(agent name, query) if this sounds like "ask <name> ...", else None.
+
+    The query half is whatever followed the name, verbatim -- not reworded or
+    stripped of "for"/"about"/"what", because that text is about to become
+    someone *else's* prompt, and a capable model understands "for a
+    suggestion on X" as a request just as well as a human would. Can be empty
+    ("ask dog" with nothing after it) -- the caller decides what to do then.
+    """
+    if not ASK_AGENT_ENABLED:
+        return None
+    match = _ASK_AGENT.search(text)
+    if not match:
+        return None
+    name = match.group(1).lower()
+    query = match.group(2).strip(" ?.!")
+    return name, query
+
+
 def as_instruction(text: str) -> str:
     """Turn a spoken instruction into its command form, if it is one.
 
@@ -1024,6 +1115,15 @@ def as_instruction(text: str) -> str:
     if forget_number is not None:
         intent.log_matched(text, f"/note {forget_number}")
         return f"/note {forget_number}"
+
+    # Same reasoning again: a phrase list has no way to capture "whatever
+    # comes after the agent's name", so this has to be parsed here too,
+    # before spoken_command() gets a chance to not match it.
+    agent_ask = ask_agent_request(text)
+    if agent_ask is not None:
+        name, query = agent_ask
+        intent.log_matched(text, f"/ask {name}")
+        return f"/ask {name} {query}".rstrip()
 
     matched = spoken_command(text)
     if matched:
