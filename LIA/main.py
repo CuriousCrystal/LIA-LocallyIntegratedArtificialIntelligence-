@@ -96,7 +96,7 @@ HELP = """
   /whoami [forget]                  voice-recognition status, or clear enrollment
   /note [list|forget <n>]           what she's been told to remember, or forget one
   /agents                           who else she can ask (see AGENTS in config.py)
-  /ask <name> <question>            ask one of them -- e.g. /ask dog what's for dinner
+  /ask <name> <question>            ask one of them -- e.g. /ask cat what's for dinner
   /alarms [cancel]                  list pending alarms/timers, or clear them
   /library [scan] what she has read; 'scan' picks up new files
   /voices         list voices found in LIA/voices/
@@ -567,7 +567,7 @@ def handle_command(cmd: str, speaker: voice.Speaker, state: dict) -> bool:
             print("[you can ask]")
             for n, m in AGENTS.items():
                 print(f"  - {n} ({m})")
-            print("  \"ask dog for ...\" (or whichever one) asks them\n")
+            print(f"  \"ask {next(iter(AGENTS))} for ...\" (or whichever one) asks them\n")
             names = ", ".join(AGENTS)
             speaker.say(f"I can ask {names} for a second opinion -- just say, "
                         f"ask {next(iter(AGENTS))} for, and whatever you want to know.")
@@ -756,6 +756,10 @@ class Controls:
         self.quit = threading.Event()
         self.close_now = threading.Event()
         self.speaker: "voice.Speaker | None" = None
+        # Set by app.py before main() starts, when the typed training panel
+        # is up: anything with the same .pending()/.take() shape as Keyboard
+        # works here, so main() can't tell a GUI entry box from stdin.
+        self.panel_keys = None
         # Seeded rather than empty: the tray menu reads this to draw its
         # checkmarks, and it can be opened before the conversation loop has
         # started up.
@@ -1051,7 +1055,7 @@ def forget_request(text: str) -> int | None:
     return int(token) if token.isdigit() else _SPOKEN_NUMBERS.get(token)
 
 
-# "ask dog for a suggestion on X", "ask cat what she thinks" -- a fixed,
+# "ask cat for a suggestion on X", "ask fox what she thinks" -- a fixed,
 # small vocabulary of names (see AGENTS in config.py), same shape as the
 # number-capture above, except what follows the name is free text, not a
 # position, so it's captured whole rather than mapped through _SPOKEN_NUMBERS.
@@ -1068,7 +1072,7 @@ def ask_agent_request(text: str) -> tuple[str, str] | None:
     stripped of "for"/"about"/"what", because that text is about to become
     someone *else's* prompt, and a capable model understands "for a
     suggestion on X" as a request just as well as a human would. Can be empty
-    ("ask dog" with nothing after it) -- the caller decides what to do then.
+    ("ask cat" with nothing after it) -- the caller decides what to do then.
     """
     if not ASK_AGENT_ENABLED:
         return None
@@ -1413,16 +1417,22 @@ def main(controls: "Controls | None" = None):
     db.init_db()
     session = Session()
     headless = bool(controls and controls.headless)
+    # The tray app has always forced listening on in headless mode, because
+    # voice used to be the only way to reach her with no console open. The
+    # training panel is a second typing surface without a console, so that
+    # forcing no longer applies when one is attached -- LISTEN_ENABLED
+    # decides instead, same as it already does in the console app.
+    have_panel = bool(controls and controls.panel_keys)
 
     speaker = voice.Speaker(enabled=SPEAK_ENABLED)
     listener = voice.Listener() if (LISTEN_ENABLED or headless) else None
     state = {
-        "listening": True if headless else LISTEN_ENABLED,
+        "listening": LISTEN_ENABLED if (have_panel or not headless) else True,
         "open_mic": True if headless else OPEN_MIC,
         "wake_word": WAKE_WORD_ENABLED,
         "window_until": 0.0,
     }
-    keys = None if headless else Keyboard()
+    keys = controls.panel_keys if have_panel else (None if headless else Keyboard())
 
     # Published before anything that can block. Waiting on Ollama can take a
     # couple of minutes at login, and until this is set the tray menu has no

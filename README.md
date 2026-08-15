@@ -207,19 +207,34 @@ Set the key in the environment, never in a file:
 
 ## Docs
 
-`docs/` holds five generated PDFs, including
-**How to Talk to Lia** — a plain-language guide for someone who has never used
-her. Rebuild them with:
+`docs/` holds six generated PDFs:
+
+| doc | what it's for |
+|---|---|
+| **How to Talk to Lia** | plain-language guide for someone who's never used her |
+| **Lia - Tools We Used** | what every library/API/model is, and why it's here |
+| **Lia - Growth Log** | historical narrative — what kind of thing she was, stage by stage |
+| **Lia - Phase Roadmap** | *living* status — what's done, what's next, what's explicitly not scheduled |
+| **Lia - Session Summary** / **Session Transcript** | frozen — from the original build session, not regenerated |
+
+Rebuild the first four with:
 
 ```powershell
 pip install reportlab
 python docs\build_guide.py
+python docs\build_tools.py
+python docs\build_growth_log.py
+python docs\build_phases.py
 ```
+
+`docs/` also collects dated `test_session_*.md` files — plain-text snapshots
+of a full feature regression pass with response times, kept for comparing
+speed and reliability over time rather than trusting memory of "it felt
+fine." Not regenerated; a new one is added per pass.
 
 ## Not built yet
 
 - Merging duplicate facts (`sister_name` and `visiting_sister_name` both exist)
-- Any way to make her forget a single note
 - Voice cloning from a short recording — see [`voices/README.md`](LIA/voices/README.md)
 - Music playback control on anything but Windows
 - OCR, so scanned PDFs stay unreadable

@@ -129,7 +129,21 @@ RETRIEVAL_MIN_WORDS = 3
 SPEAK_ENABLED = True
 
 # Push-to-talk: press Enter on an empty prompt to record, Enter again to stop.
-LISTEN_ENABLED = True
+#
+# Off for now, on purpose: typed training through the panel below is the
+# current way of working with her, and the tray app used to force this True
+# regardless of this flag -- see the have_panel check in main.main(), which
+# is what makes turning this off actually take effect there. The tray's own
+# "Listening" checkbox still works live, with no restart, once you're ready
+# for voice again -- flip this back to True to also make that the default
+# next time she starts.
+LISTEN_ENABLED = False
+
+# Shows a small typed window (panel.py) alongside the tray icon when she
+# starts headless -- a place to type without a microphone or a console.
+# Reuses the exact same conversation pipeline typing already goes through in
+# the console app; nothing about what she does with what's typed changes.
+TRAINING_PANEL_ENABLED = True
 
 # Folder you drop voice files into. See voices/README.md.
 VOICES_DIR = BASE_DIR / "voices"
@@ -231,7 +245,7 @@ OPENROUTER_ONLINE = True
 
 # --- asking other models by name ---
 # A second, separate path to the cloud: not the conversation itself, but a
-# named model consulted on request -- "Lia, ask dog for a suggestion." Off
+# named model consulted on request -- "Lia, ask cat for a suggestion." Off
 # would match weather and lookups, but this one is on by default because it
 # was asked for, not despite that.
 ASK_AGENT_ENABLED = True
@@ -246,29 +260,33 @@ ASK_AGENT_ENABLED = True
 # that streamed path) would have been the wrong thing to optimise for on this
 # one:
 #
-#   dog   nvidia/nemotron-nano-12b-v2-vl:free  ~1-2s typical, clean -- fastest tried, despite being a vision model
 #   cat   nvidia/nemotron-3-nano-30b-a3b:free  ~2s typical, clean
 #   fox   poolside/laguna-s-2.1:free           ~2s typical, clean
 #
-# First pick had dog on google/gemma-4-26b-a4b-it:free (5.26s) -- correctly
-# answered, just heavier than a job this narrow needs. Swapped for the
-# lighter one above once that was noticed.
+# Started at four names, then three. First pick had dog on
+# google/gemma-4-26b-a4b-it:free (5.26s) -- correct, just heavier than the
+# job needed, swapped for something lighter. That replacement
+# (nvidia/nemotron-nano-12b-v2-vl:free) was fast when it worked -- but across
+# roughly a dozen calls over several test sessions it failed outright close
+# to a third of the time (one hang measured at 121s before the timeout fix
+# below, several clean 15s timeouts after), each failure a real wait for
+# nothing. Dropped rather than kept as the slot that "sometimes takes 15
+# seconds instead of 2".
 #
-# A fourth slot (owl) was tried and dropped rather than kept as the weak
-# link: openai/gpt-oss-20b:free worked but was slow (6.91s); the lighter
-# replacement, nvidia/nemotron-nano-9b-v2:free, measured well once (3.08s)
-# then failed empty 5/5 on a re-test minutes later -- currently degraded, not
-# a fluke; cohere/north-mini-code:free was the one alternative that kept
-# answering, but at 5-9s it wasn't actually lighter than what it replaced.
-# Three reliable, genuinely fast agents beat four with a weak one -- add a
-# fourth back if OpenRouter's free catalog turns up something both light and
-# consistent.
+# A fourth slot (owl) was tried and dropped earlier for the same reason at a
+# different model: openai/gpt-oss-20b:free worked but was slow (6.91s); the
+# lighter replacement, nvidia/nemotron-nano-9b-v2:free, measured well once
+# (3.08s) then failed empty 5/5 on a re-test minutes later -- currently
+# degraded, not a fluke; cohere/north-mini-code:free was the one alternative
+# that kept answering, but at 5-9s it wasn't actually lighter than what it
+# replaced.
 #
-# The remaining cost: all three are now NVIDIA Nemotron/Poolside rather than
-# spanning more vendors, since speed was the actual ask and those kept
-# winning on it.
+# Two reliable, genuinely fast agents beat three (or four) with a weak link
+# -- add one back only if something both light and consistently reliable
+# turns up; re-measure on *total* time before trusting any candidate, the
+# same way these two were.
 #
-# Rejected outright, tried across two rounds of testing: nemotron-3.5-lightning
+# Rejected outright, tried across multiple rounds of testing: nemotron-3.5-lightning
 # answers with its raw chain-of-thought instead of a reply ("Here's a
 # thinking process: 1...."); nemotron-3-nano-omni-30b-a3b-reasoning currently
 # 400s ("DEGRADED function"); liquid/lfm-2.5-2.6b and poolside/laguna-xs-2.1
@@ -277,7 +295,6 @@ ASK_AGENT_ENABLED = True
 # measurement before swapping any of these -- free-tier availability changes
 # on OpenRouter's side, not just this file's.
 AGENTS = {
-    "dog": "nvidia/nemotron-nano-12b-v2-vl:free",
     "cat": "nvidia/nemotron-3-nano-30b-a3b:free",
     "fox": "poolside/laguna-s-2.1:free",
 }
@@ -658,7 +675,7 @@ SPOKEN_COMMANDS = {
         "what have i told you to remember", "read back my notes",
     ],
     # Discoverability for AGENTS, matching every other listable thing she has.
-    # "ask dog for ..." itself isn't a phrase here -- it carries free text
+    # "ask cat for ..." itself isn't a phrase here -- it carries free text
     # after the name, which no entry in this dict can capture (see
     # ask_agent_request in main.py, parsed the same way track/note numbers are).
     "/agents": [

@@ -21,22 +21,28 @@ A(callout("<b>What she hears, and where it goes.</b> Your voice never leaves thi
           "does the thinking is too large to run on this laptop. Her memory of you, your documents, "
           "and the recording itself all stay here."))
 
+A(callout("<b>Right now, talking to her means typing.</b> A small window opens alongside the cat "
+          "in the tray, and that's the current way in — type a line, press Enter, same conversation "
+          "either way. Her microphone is off while this is how she's being worked with. Everything "
+          "below about the tray icon and about voice describes how she behaves once listening is "
+          "switched back on, which the tray's own <b>Listening</b> option does instantly."))
+
 # ------------------------------------------------------------------ basics ---
 A(H1("Starting her"))
 
 A(P("She usually starts on her own when you turn the computer on. Look for a small "
-    "<b>orange dot</b> near the clock, at the bottom-right of your screen."))
+    "<b>purple cat</b> near the clock, at the bottom-right of your screen."))
 
 A(table([
     ["What you see", "What it means"],
-    ["Filled orange dot", "She is here and listening"],
-    ["Hollow ring", "She is here but not listening"],
-    ["No dot at all", "She isn't running — see <i>If something seems wrong</i>"],
+    ["Filled purple cat", "She is here and listening"],
+    ["Hollow cat outline", "She is here but not listening"],
+    ["No cat at all", "She isn't running — see <i>If something seems wrong</i>"],
 ], [45, 120]))
 
-A(P("She takes about half a minute to be ready after the computer starts, and then <b>waits "
-    "quietly</b> — she won't greet you or say anything until you speak to her. Say "
-    "<i>“Lia”</i> whenever you want her."))
+A(P("Once listening is on: she takes about half a minute to be ready after the computer starts, "
+    "and then <b>waits quietly</b> — she won't greet you or say anything until you speak to her. "
+    "Say <i>“Lia”</i> whenever you want her."))
 A(P("She starts when you log in, which usually isn't the moment you actually want to talk. "
     "Greeting an empty room and then falling silent by the time you sit down was worse than "
     "simply waiting.", "LiaNote"))
@@ -120,8 +126,21 @@ A(P("She plays <b>only her own files</b>. She can't control Spotify, YouTube or 
     "playing elsewhere on the computer — that was built once and removed, because it could "
     "operate someone else's player but never actually start anything.", "LiaNote"))
 
-A(H2("Using the orange dot"))
-A(P("Right-click the orange dot for the same controls, plus a few more:"))
+A(H2("A second opinion"))
+A(P("She can put a question to a different, named model and tell you what it said — a second "
+    "opinion, not a replacement for her own answer."))
+A(table([
+    ["Say this", "What happens"],
+    ["“ask cat for a suggestion on X”", "Cat answers, and she relays it: “Cat says: …”"],
+    ["“ask fox what she thinks about this”", "Same, from a different model"],
+    ["“who can you ask”", "Lists who's available"],
+], [70, 95]))
+A(P("Two names today — cat, fox — each a different free model. She only does this when "
+    "asked by name; it never happens on its own. See <i>Privacy, plainly</i> below for what "
+    "that question actually costs.", "LiaNote"))
+
+A(H2("Using the cat in the tray"))
+A(P("Right-click the cat for the same controls, plus a few more:"))
 
 A(table([
     ["Menu item", "What it does"],
@@ -229,10 +248,13 @@ A(H1("If something seems wrong"))
 
 A(table([
     ["What you notice", "What to try"],
-    ["She doesn't answer",
-     "Say <b>“Lia”</b> first — she ignores speech that isn't addressed to her. "
-     "Check the dot is filled, not hollow."],
-    ["No orange dot",
+    ["She doesn't answer to typing",
+     "Check the panel window is actually the one focused — click into its text line first."],
+    ["She doesn't answer to voice",
+     "Check listening is actually on right now (see the callout above) — "
+     "say <b>“Lia”</b> first either way, she ignores speech that isn't addressed to her, "
+     "and check the cat is filled, not hollow."],
+    ["No cat in the tray",
      "She isn't running. Restart the computer, or open the <b>Lia</b> app."],
     ["She takes ages to reply",
      "Normal for the first reply after a break — she's loading. Later replies are quicker."],
@@ -243,28 +265,31 @@ A(table([
     ["She calls you the wrong name",
      "Tell her the right one and she'll keep it."],
     ["Nothing works",
-     "Right-click the dot → <b>Open log</b>. The last few lines usually say what's wrong."],
+     "Right-click the cat → <b>Open log</b>. The last few lines usually say what's wrong."],
 ], [55, 110]))
 
 A(H2("Privacy, plainly"))
-A(P("Her microphone is on whenever the dot is filled. This is the part worth reading properly, "
-    "because it changed."))
+A(P("Her microphone is on whenever the cat is filled — right now, per the callout near the start "
+    "of this guide, it may not be. This is the part worth reading properly regardless, because it "
+    "changed."))
 A(table([
     ["This stays on the computer", "This is sent away"],
     ["The recording of your voice — it is turned into text here, and the audio is never uploaded",
      "<b>The words of your conversation</b>, sent to an online service so it can work out a reply"],
     ["Everything she remembers about you", "The last few things said, so the reply makes sense in context"],
     ["Your documents, and the search through them", "Passages from a document, but only when you ask her about one"],
+    ["Everything else you say to her", "Only a question you explicitly aim at “cat” or “fox” — "
+     "sent to that specific model, and nothing else about the conversation goes with it"],
 ], [82, 83]))
 A(P("The thinking happens online because that part of her is far too large to run on a laptop. "
     "Everything else — hearing you, her voice, her memory, your files — happens here."))
 A(P("If you want her not to hear something at all, say <b>“Lia, stop listening”</b>, or right-click "
-    "the dot and untick <b>Listening</b>. She can also be set back to thinking entirely on this "
+    "the cat and untick <b>Listening</b>. She can also be set back to thinking entirely on this "
     "computer, which is private but noticeably less clever — that is "
     "<font face='Courier'>CLOUD_CHAT_ENABLED</font> in her settings."))
 
-A(callout("<b>The one thing to remember.</b> Say <b>“Lia”</b>, wait a few seconds, then talk normally. "
-          "Everything else is optional."))
+A(callout("<b>The one thing to remember.</b> Type into the panel, or once listening is on say "
+          "<b>“Lia”</b> and wait a few seconds, then talk normally. Everything else is optional."))
 
 build(HERE / "How to Talk to Lia.pdf",
       "How to Talk to Lia",

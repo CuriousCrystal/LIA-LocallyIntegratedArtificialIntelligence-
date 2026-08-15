@@ -348,6 +348,70 @@ A(callout("<b>And the promise had to change with it.</b> The guide told people, 
           "so the guide now sets out what leaves and what stays, in a table, rather than "
           "reassuring anyone."))
 
+A(H2("Asking someone else"))
+A(P("A different shape of reaching outward than anything above — not controlling something on the "
+    "machine, but consulting a second, named intelligence and relaying what it said. "
+    "<font face='Courier'>“Lia, ask cat for a suggestion”</font> reaches a specific free model on "
+    "OpenRouter and she repeats the answer attributed, the same way she already cites a library "
+    "passage rather than folding it into her own words."))
+A(P("<b>Worth distinguishing from the multi-agent idea shelved below:</b> that one was about "
+    "splitting <i>her own</i> reasoning across several small local models stacked on one 4GB card. "
+    "This is the opposite shape — one cloud call, on request, to a model she is not and doesn't "
+    "pretend to be, with zero local VRAM cost. Closer kin to the “look that up” internet path than "
+    "to anything rejected."))
+A(P("<b>Picked light, and measured on the metric that actually applies here.</b> This path doesn't "
+    "stream to speech sentence-by-sentence the way her own replies do — she collects the whole "
+    "answer before saying any of it — so <i>total</i> reply time is what a person actually waits "
+    "on, not time to the first word. The first two names were the two best-known free models "
+    "available and both were slower than the job needed (5.3s and 6.9s total); replaced once that "
+    "was noticed, correctly this time on total time.", "LiaNote"))
+A(callout("<b>A four-name roster shrank to three, then to two, each time on purpose.</b> Sixteen "
+          "free models were catalogued from OpenRouter directly and eight were measured for real. "
+          "The obvious lightest replacement for the fourth slot answered well once — then failed "
+          "empty five times in a row on a dedicated re-test minutes later, not a fluke but a "
+          "currently degraded model. Nothing else tried for that slot was both light and reliable, "
+          "so it was dropped rather than filled with a slow stand-in. The same thing then happened "
+          "to the fastest-on-paper replacement for a different name: fast when it worked, but wrong "
+          "close to a third of the time across repeated real testing, each failure a real wait "
+          "rather than an answer. Two names that have never once failed beat three or four with a "
+          "weak link."))
+A(P("<b>A real bug turned up in the course of measuring this, unrelated to which models were "
+    "chosen.</b> A library timeout on a streamed request only bounds the gap between chunks, not "
+    "the whole call — a provider trickling data slowly can run past it without ever tripping it. "
+    "Caught directly: one call ran 121 seconds and still came back empty, well past the 15-second "
+    "limit that had been set and never fired. A wall-clock ceiling enforced inside the read loop "
+    "itself now catches this regardless of which model is asked, or what a provider's connection "
+    "does.", "LiaNote"))
+
+A(H2("A typed way in, and a face to go with it"))
+A(P("The tray app's first real window. Until now it was a background process with no window at "
+    "all — a warm dot in the tray, and voice as the only way in when there was no console to type "
+    "into. A small panel now opens alongside that dot: a typed line in, a transcript out, styled "
+    "in white and orange after Claude Code's own terminal. Nothing about the conversation itself "
+    "changed to make this work — the panel satisfies the exact same two interfaces the console "
+    "already relied on (a thing with <font face='Courier'>.pending()</font>/"
+    "<font face='Courier'>.take()</font> for typed input, a thing with "
+    "<font face='Courier'>.write()</font> for what she prints), so main.py's own conversation loop "
+    "cannot tell a GUI entry box from a keyboard."))
+A(P("<b>Listening is off while this is the way in</b> — not commented out, a config flag "
+    "(<font face='Courier'>LISTEN_ENABLED</font>), the same switch the console app already had. "
+    "The tray app used to force listening on unconditionally whenever there was no console, on the "
+    "reasoning that voice was the only way to reach her otherwise; the panel is a second typing "
+    "surface without a console, so that forcing no longer applies once one is attached. The tray's "
+    "own <b>Listening</b> checkbox still works live, no restart, the moment voice is wanted again."))
+A(callout("<b>One real design decision, checked rather than assumed.</b> Tkinter and the tray "
+          "icon's own event loop both want to own the thread that started them, and getting this "
+          "wrong would mean a frozen window or a dead tray icon. Verified before writing any of it: "
+          "the tray library's own documentation states plainly that running its loop off the main "
+          "thread is unsafe in general — except on Windows specifically, where it's documented as "
+          "safe. This project is Windows-only throughout, so that's the trade taken: the tray icon "
+          "gives up the main thread, Tkinter keeps it."))
+A(P("<b>The dot became a cat.</b> Purple, filled when listening, hollow when not — same two states "
+    "the dot already carried, kept rather than reinvented. The one genuinely new signal is the "
+    "mouth: open for speaking, closed for idle, replacing a small dark circle inside the old dot "
+    "that meant the same thing but only by convention. A cat with its mouth open reads as "
+    "<i>speaking</i> without having to already know what the shape used to mean.", "LiaNote"))
+
 A(H2("Not yet built"))
 A(bullets([
     "Opening or closing applications.",

@@ -180,15 +180,27 @@ A(H2("pystray"))
 A(P("A small cross-platform library for putting an icon in the system tray (the icons next to the "
     "clock) with a right-click menu — the minimum needed to have a program live in the background "
     "without a normal window."))
-A(P("<b>In Lia:</b> the orange dot. Filled when listening, hollow when muted, with a menu for "
-    "toggling voice/mic, ending the conversation, opening the log, and quitting cleanly."))
+A(P("<b>In Lia:</b> the cat in the tray. Filled when listening, hollow when muted, with a menu for "
+    "toggling voice/mic, ending the conversation, opening the log, and quitting cleanly. Runs on its "
+    "own background thread now rather than owning the main one, to share the process with Tkinter — "
+    "see below.", "LiaNote"))
 
 A(H2("Pillow (PIL)"))
 A(P("The standard Python library for opening, creating, and manipulating images — resizing, "
     "drawing shapes, reading pixel data. The name PIL (Python Imaging Library) predates Pillow, "
     "which is the actively maintained fork almost everyone actually installs today."))
-A(P("<b>In Lia:</b> draws the tray icon itself — a small circle, filled or hollow — generated in "
-    "code rather than loaded from an image file."))
+A(P("<b>In Lia:</b> draws the tray icon itself — a small cat face, filled or hollow — generated in "
+    "code (circles, triangles, a handful of lines) rather than loaded from an image file."))
+
+A(H2("Tkinter"))
+A(P("Python's own built-in GUI toolkit — ships with the standard library, needs nothing installed. "
+    "Not the most modern-looking option available, but the narrowest one that does the job: a "
+    "window, a text area, an entry line, and enough control over color and font to look "
+    "deliberate rather than default."))
+A(P("<b>In Lia:</b> the typed training panel (<font face='Courier'>panel.py</font>) — white "
+    "background, warm orange accents, styled after Claude Code's own terminal. Runs on the process's "
+    "main thread, which is the one hard requirement Tkinter actually has; pystray's tray icon moved "
+    "to a background thread to make room for it.", "LiaNote"))
 
 A(H2("pycaw"))
 A(P("A Python wrapper over the Windows Core Audio APIs — the COM interfaces Windows itself uses for "
@@ -271,6 +283,15 @@ A(P("Worth recording, because it inverted an earlier conclusion: a whole spoken 
     "2.19s on the local 3B, 2.51s on paid gpt-4o-mini, and 4.53s on a free model. <b>Local is the "
     "fastest of the three.</b> The cloud buys capability, not speed — which only became true after "
     "the OLLAMA_URL fix cut local first-token from 2.42s to 0.73s.", "LiaNote"))
+A(P("<b>A second, separate use:</b> “ask cat/fox” reaches two more named models through the "
+    "same API and key, purely on request (see the Growth Log). This path doesn't stream and "
+    "doesn't hide latency behind a first sentence the way the conversation does — she collects the "
+    "whole reply before saying any of it — so what was measured for these two is <i>total</i> "
+    "time, not time to first word, and each is capped at 15 seconds of wall-clock time regardless "
+    "of what the provider does. Two other names were tried and dropped rather than kept: one free "
+    "model measured well once and then failed empty five times in a row on a re-test, another was "
+    "fast when it worked but wrong close to a third of the time overall — both cost real waits for "
+    "nothing rather than just being slow.", "LiaNote"))
 
 A(H2("Open-Meteo"))
 A(P("A free weather API that needs no signup or key at all — just a latitude/longitude and it "

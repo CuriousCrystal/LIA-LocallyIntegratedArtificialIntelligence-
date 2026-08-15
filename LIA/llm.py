@@ -220,7 +220,7 @@ def _cloud_stream(messages: list[dict]):
 def ask_agent(model: str, query: str) -> str:
     """One question to a specific OpenRouter model, by name, collected whole.
 
-    Used for "ask dog/cat/fox" (see AGENTS in config.py) -- she has to
+    Used for "ask cat/fox" (see AGENTS in config.py) -- she has to
     have the entire answer before she can relay it, so nothing is lost by not
     yielding pieces the way chat_stream does for her own replies.
 
