@@ -76,9 +76,14 @@ A(P("The tray app's first window. A small typed panel now opens alongside the tr
     "same conversation pipeline the console already had, not a new one: it satisfies the same "
     "typed-input and printed-output shapes <font face='Courier'>main.py</font> already knew how to "
     "use, so nothing about the conversation loop itself needed to change."))
-A(P("<font face='Courier'>LISTEN_ENABLED</font> is off while this is the current way of working "
+A(P("<font face='Courier'>LISTEN_ENABLED</font> was off while this was the current way of working "
     "with her — a config flag, not commented-out code, specifically so the tray's own "
     "<b>Listening</b> checkbox keeps working live, no restart, the moment voice is wanted again."))
+A(P("<b>That moment has arrived.</b> The panel existed to cover for her not being able to hear "
+    "cheaply; she can now, on the NPU, so <font face='Courier'>LISTEN_ENABLED</font> is back on and "
+    "<font face='Courier'>TRAINING_PANEL_ENABLED</font> is off. <font face='Courier'>panel.py</font> "
+    "stays in the tree rather than being deleted — it costs nothing switched off, and it is the "
+    "only way to reach her on a machine with no working microphone.", "LiaNote"))
 A(P("The tray icon changed too: a purple cat face, replacing the plain warm dot. Same two states "
     "(filled/listening, hollow/not) kept rather than reinvented; the mouth is the one new signal — "
     "open for speaking, closed for idle — doing the same job the old inner dot did, more legibly.",
@@ -88,6 +93,63 @@ A(callout("<b>The one real risk was threading, and it was checked, not assumed.<
           "writing any of it rather than after something froze: the tray library documents running "
           "off the main thread as unsafe in general, safe specifically on Windows — which is what "
           "this project has been throughout, so that's the trade taken."))
+
+A(PageBreak())
+
+# ------------------------------------------------------------------ addition 3 ---
+A(H1("A machine with no graphics card  ·  done, not originally scoped"))
+A(P("She moved to a Core Ultra 7 255U — twelve cores, 16GB of LPDDR5X-8533, an integrated GPU, an "
+    "idle NPU, and no discrete card at all. Every performance note written before this was measured "
+    "on a machine with a 4GB card, so the question was not whether she still ran but which of those "
+    "notes survived contact with the new hardware."))
+A(P("<b>The surprise was that memory bandwidth barely changed.</b> LPDDR5X-8533 gives roughly "
+    "136 GB/s, which is the same order as the 4GB card's VRAM. Token generation is bandwidth-bound "
+    "rather than compute-bound, so generation held up at 21 tok/s — against speech's ~5 tok/s, her "
+    "voice is the bottleneck and the model is not."))
+
+A(H2("Hearing moved to the NPU"))
+A(P("The old design put Whisper on the CPU <i>so it wouldn't compete with Ollama for the 4GB of "
+    "VRAM</i>. With no card that reasoning inverts exactly: hearing and thinking both want the CPU "
+    "and now genuinely fight. But the chip has an NPU doing nothing, and speech recognition is the "
+    "fixed-shape workload an NPU is actually good at."))
+A(table([
+    ["Whisper base.en, warm, best of 3", "2.3s clip", "5.4s clip", "14.9s clip"],
+    ["faster-whisper, CPU int8 (was)", "0.55s", "0.59s", "0.69s"],
+    ["OpenVINO, CPU", "0.42s", "0.50s", "0.71s"],
+    ["OpenVINO, iGPU", "0.15s", "0.20s", "0.37s"],
+    ["OpenVINO, NPU (now)", "0.11s", "0.16s", "0.31s"],
+], [200, 82, 82, 82]))
+A(P("OpenVINO <i>on the CPU</i> is barely better than what it replaced, and worse on the long "
+    "clip. Moving to OpenVINO is not the win; moving off the CPU is — the seconds it returns are "
+    "seconds the CPU keeps for the language model.", "LiaNote"))
+A(callout("<b>One thing the NPU cannot do:</b> take Whisper's vocabulary hint. A prompt changes the "
+          "decoder's input length and the NPU compiles to fixed shapes, so asking for one raises "
+          "rather than degrading. Measured cost of losing it: none on the samples tested — "
+          "“Anaya” came through correctly without it. <font face='Courier'>WHISPER_HINT_ENABLED</font> "
+          "carries the detail, and CPU and iGPU both still accept it."))
+
+A(H2("The wait was reading, not writing"))
+A(P("Time to first word was 7.68s, which looked like a slow model and was not. Generation was fine "
+    "throughout at 21 tok/s; her 575-token system prompt was being <i>read</i> at about 110 tok/s. "
+    "Ollama caches the prefix, so it is a once-per-session cost — turns two onward were already "
+    "about a second."))
+A(P("<font face='Courier'>llm.warm_up()</font> was sending an empty message list, which loads the "
+    "weights but leaves the prompt unread — so the existing prewarm was warming the cheap half. It "
+    "now takes her real system message, and startup pays the cost while nobody is waiting. "
+    "<b>7.46s to 2.35s on the first reply.</b>", "LiaNote"))
+
+A(H2("Two smaller things the move surfaced"))
+A(bullets([
+    "<b>The judge ran on every turn regardless of whether anything was indexed.</b> It costs a "
+    "model call — 2.3–2.9s here, against 0.47s on the old machine — and an empty library was paying "
+    "it every turn to be told there was nothing to find. Now gated on "
+    "<font face='Courier'>db.document_titles()</font> first.",
+    "<b>A missing Ollama hung startup for the full three minutes.</b> The wait exists because she "
+    "beats Ollama to the login on autostart, which is worth keeping; waiting for something that "
+    "was never installed is not. Now detected and reported in about two seconds — carefully, "
+    "because a stale PATH after an install looks identical to a missing one and the naive check "
+    "would abandon a perfectly good install.",
+]))
 
 A(PageBreak())
 
@@ -147,10 +209,11 @@ A(table([
      "Only reachable through AUTO_EXTRACT_FACTS, which stays off by choice. Revisit only if that "
      "changes."],
     ["The multi-agent “small Lias” split\n(decomposing her own reasoning)",
-     "No spare VRAM for stacked local calls on a 4GB card already near capacity. The role split it "
-     "would add already exists — cloud for capability, judge.py/intent.py for narrow questions. A "
-     "decomposed query that collapses to yes/no is just another judge.py. (Distinct from “Asking "
-     "someone else” above, which is a different shape entirely.)"],
+     "The old reason was no spare VRAM on a 4GB card. That card is gone, and the reason is now "
+     "worse rather than better: stacked local calls on a 15W CPU cost wall-clock time directly, and "
+     "the judge alone was measured at 2.3-2.9s a call. The role split it would add already exists "
+     "anyway — judge.py/intent.py for narrow questions. A decomposed query that collapses to yes/no "
+     "is just another judge.py. (Distinct from “Asking someone else” above.)"],
     ["Widening the action surface\n(opening/closing apps, broader OS control)",
      "Not a current priority. Two real prerequisites whenever it is picked up: intent.py's tools "
      "are deliberately parameterless, so this needs new argument-filling machinery, not just more "
@@ -162,10 +225,16 @@ A(table([
 
 A(H1("Open questions"))
 A(bullets([
-    "<b>Which model carries the actual conversation.</b> Local (2.19s, free, least capable), paid "
-    "gpt-4o-mini (2.51s, ~$0.0001/turn), or the current free model (4.53s, rate-limited but no "
-    "cost) — still an open call, not a settled one, revisit as real fallback data accumulates via "
-    "1.1 above.",
+    "<b>Which model carries the actual conversation.</b> Reopened by the hardware move, and "
+    "currently answered by default rather than by decision: no <font face='Courier'>OPENROUTER_API_KEY</font> "
+    "is set on the new machine, so she is fully local on gemma2:2b — chosen over llama3.2:3b to "
+    "keep the download small, and noticeably plainer for it. Generation measured 21 tok/s with "
+    "headroom, so llama3.2:3b is very likely affordable here; that is the next thing to try, not a "
+    "settled choice.",
+    "<b>Whether the accuracy claims hold against a real microphone.</b> Every transcription "
+    "measured so far has been of synthesised speech, which is cleaner than a room. In particular "
+    "“losing the vocabulary hint costs nothing” is a conclusion drawn from clean audio and should "
+    "not be trusted until someone has actually talked to her.",
     "<b>A third (or fourth) “ask” name.</b> Two were tried and dropped rather than kept as weak "
     "links. Worth revisiting if OpenRouter's free catalog turns up something both light and "
     "consistently reliable — re-measure on total time, the way cat and fox were, before adding "

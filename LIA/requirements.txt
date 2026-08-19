@@ -19,8 +19,16 @@ av>=11.0               # the .m4a/AAC fallback libsndfile has no decoder for.
                        # music.py imports it directly, not by accident.
 
 # --- voice: listening (optional, only needed with LISTEN_ENABLED) ---
-faster-whisper>=1.1   # speech recognition, runs on CPU to leave the GPU to Ollama
+faster-whisper>=1.1   # speech recognition on the CPU. Still the fallback, and
+                      # still what runs if the OpenVINO path below is absent.
 pysilero-vad>=3.0     # voice activity detection for the open mic (onnx, no torch)
+
+# Speech recognition on an Intel NPU (WHISPER_BACKEND = "openvino"). Optional:
+# without it she falls back to faster-whisper by herself. Needs a model too --
+# see LIA/models/README.md. No PyTorch: the published models are pre-converted,
+# which is the point of using them.
+openvino-genai>=2025.0
+huggingface_hub>=0.25   # only to fetch that model; not imported at runtime
 
 # --- running as a background app ---
 pystray>=0.19         # system tray icon

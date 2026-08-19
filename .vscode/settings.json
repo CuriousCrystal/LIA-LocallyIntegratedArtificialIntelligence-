@@ -1,3 +1,7 @@
 {
-    "chat.mcp.access": "none"
+    "chat.mcp.access": "none",
+    // The project venv, so the editor resolves imports against the same
+    // interpreter that actually runs her -- otherwise every dependency in
+    // requirements.txt is reported missing while the app runs perfectly.
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe"
 }

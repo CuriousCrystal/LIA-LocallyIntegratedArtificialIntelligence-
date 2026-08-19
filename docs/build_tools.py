@@ -130,11 +130,30 @@ A(P("A reimplementation of OpenAI's Whisper speech-recognition model, built on C
     "for significantly faster inference than the original, especially on CPU. Whisper itself is a "
     "model trained on a huge amount of multilingual audio, which is why it's robust to accents and "
     "background noise without any per-user training."))
-A(P("<b>In Lia:</b> runs the <font face='Courier'>small.en</font> size, deliberately on CPU so it "
-    "never competes with Ollama for the 4GB of GPU memory the language model needs. Verified during "
-    "development that <font face='Courier'>small.en</font> gets names right "
-    "(“Anaya”) that the smaller <font face='Courier'>base.en</font> garbles "
-    "(“Ania”)."))
+A(P("<b>In Lia:</b> now the <i>fallback</i> rather than the default — see OpenVINO below. It still "
+    "runs whenever the OpenVINO path or its model is missing, on CPU, and it is what every machine "
+    "without an Intel NPU will use. Verified during development that "
+    "<font face='Courier'>small.en</font> gets names right (“Anaya”) that the smaller "
+    "<font face='Courier'>base.en</font> garbles (“Ania”); "
+    "<font face='Courier'>base.en</font> is the current size, chosen for speed."))
+
+A(H2("OpenVINO / openvino-genai"))
+A(P("Intel's inference runtime, and the reason speech recognition is no longer on the CPU at all. "
+    "It compiles a model for a specific processor — CPU, integrated GPU, or the NPU (neural "
+    "processing unit) that ships on Core Ultra chips — and "
+    "<font face='Courier'>openvino-genai</font> wraps that with a ready-made "
+    "<font face='Courier'>WhisperPipeline</font>, so no model conversion or PyTorch install is "
+    "needed: the converted models are published and simply downloaded."))
+A(P("<b>In Lia:</b> Whisper runs on the NPU. On the current machine that is 0.11s for a short "
+    "sentence against faster-whisper's 0.55s — but the reason it matters is not the number. The "
+    "original design ran Whisper on the CPU precisely so it would not fight the language model for "
+    "the graphics card; with no graphics card, both wanted the CPU and did fight. The NPU restores "
+    "the separation the design always assumed, on silicon that was otherwise sitting idle.",
+    "LiaNote"))
+A(callout("<b>The one limitation:</b> the NPU compiles to fixed tensor shapes, and Whisper's "
+          "optional vocabulary hint changes the decoder's input length — so asking for one raises "
+          "an error rather than degrading. CPU and integrated GPU both accept it. "
+          "<font face='Courier'>WHISPER_HINT_ENABLED</font> exists to carry that trade."))
 
 A(H2("CTranslate2"))
 A(P("A C++ inference engine specifically optimised for transformer models (the neural network "

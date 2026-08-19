@@ -33,7 +33,16 @@ OLLAMA_URL = "http://127.0.0.1:11434"
 
 # Pick whatever you've pulled with `ollama pull <name>`.
 # llama3.2:3b / gemma2:2b / phi3:mini all fit comfortably on 4GB VRAM.
-MODEL_CHAT = "llama3.2:3b"
+#
+# gemma2:2b rather than llama3.2:3b on this machine: there is no VRAM here at
+# all, so the model runs on the CPU out of the same 15.5GB everything else is
+# using, and a third fewer parameters is a third less memory to read for every
+# single token. Generation on a CPU is limited by memory bandwidth, not by the
+# processor, so model size is very nearly the whole story.
+#
+# Put llama3.2:3b back if she reads as too simple -- it is the better model,
+# and the measurements beside WHISPER_DEVICE suggest there is headroom for it.
+MODEL_CHAT = "gemma2:2b"
 MODEL_EMBED = "nomic-embed-text"
 
 # Absolute, so Lia finds the same memories no matter which directory you launch from.
@@ -130,20 +139,27 @@ SPEAK_ENABLED = True
 
 # Push-to-talk: press Enter on an empty prompt to record, Enter again to stop.
 #
-# Off for now, on purpose: typed training through the panel below is the
-# current way of working with her, and the tray app used to force this True
-# regardless of this flag -- see the have_panel check in main.main(), which
-# is what makes turning this off actually take effect there. The tray's own
-# "Listening" checkbox still works live, with no restart, once you're ready
-# for voice again -- flip this back to True to also make that the default
-# next time she starts.
-LISTEN_ENABLED = False
+# On again. This was switched off while she had no usable ears -- typing
+# through the panel below was the way in, and the comment here used to say
+# "flip this back to True once you're ready for voice again."
+#
+# That time is now: speech recognition runs on the NPU (see WHISPER_DEVICE),
+# a short sentence comes back in 0.11s, and it no longer costs the CPU
+# anything the language model wanted. Voice is the point of her.
+LISTEN_ENABLED = True
 
 # Shows a small typed window (panel.py) alongside the tray icon when she
 # starts headless -- a place to type without a microphone or a console.
-# Reuses the exact same conversation pipeline typing already goes through in
-# the console app; nothing about what she does with what's typed changes.
-TRAINING_PANEL_ENABLED = True
+#
+# Off: it existed to cover for her not being able to hear, and she can hear
+# again. Keeping it on would also quietly hold LISTEN_ENABLED's old behaviour
+# in place -- main.main() treats an attached panel as "there is another way in,
+# so don't force listening", which is exactly what we no longer want.
+#
+# panel.py is left in the tree rather than deleted. It costs nothing switched
+# off, it is the only way to reach her on a machine with no microphone, and it
+# is the fallback if a driver update takes the mic away.
+TRAINING_PANEL_ENABLED = False
 
 # Folder you drop voice files into. See voices/README.md.
 VOICES_DIR = BASE_DIR / "voices"
@@ -736,6 +752,90 @@ GREETING_WINDOW_SECONDS = 30
 # ("Anaya" -> "Ania"). If she starts mangling the names of people who matter,
 # this is the line to put back.
 WHISPER_MODEL = "base.en"
+
+# Which speech-recognition engine to use.
+#
+#   "openvino"       -- OpenVINO Runtime, which can put Whisper on the NPU
+#   "faster-whisper" -- the original CPU path, unchanged
+#
+# This exists because the machine changed. The old one had a 4GB graphics card,
+# and the note above about running Whisper on the CPU "so it doesn't compete
+# with Ollama for the VRAM" was correct there: hearing and thinking sat on
+# separate silicon and never fought.
+#
+# On a Core Ultra with no discrete card that reasoning inverts -- Whisper and
+# the language model both want the same CPU, and now they do fight. But the
+# chip has an NPU sitting completely idle, and speech recognition is exactly
+# the fixed-shape workload an NPU is good at. Moving Whisper there restores the
+# separation the design always assumed, on hardware that was already paid for.
+#
+# Falls back to faster-whisper by itself if OpenVINO or the model is missing,
+# so this is safe to leave on "openvino" on a machine that has neither.
+WHISPER_BACKEND = "openvino"
+
+# Which processor runs it. "NPU" / "GPU" (the integrated one) / "CPU".
+#
+# Measured here on the Core Ultra 7 255U, base.en, warmed, best of 3, same
+# audio -- including the old faster-whisper path as the "before":
+#
+#                                  2.3s clip   5.4s clip   14.9s clip
+#     faster-whisper (CPU int8)      0.55s       0.59s        0.69s
+#     OpenVINO CPU                   0.42s       0.50s        0.71s
+#     OpenVINO iGPU                  0.15s       0.20s        0.37s
+#     OpenVINO NPU                   0.11s       0.16s        0.31s
+#
+# Against the path this replaces, the NPU is 5.2x / 3.8x / 2.2x -- the gain is
+# largest on short clips, which is the case that actually matters, because
+# almost everything said to her is a sentence rather than a paragraph.
+#
+# But the raw number is the smaller half of the argument. That work now happens
+# on a part of the chip nothing else wants, so the seconds it gives back are
+# seconds the CPU keeps for the language model. Note OpenVINO on the CPU is
+# barely better than faster-whisper and is *worse* on the long clip: moving to
+# OpenVINO is not the win on its own, moving off the CPU is.
+#
+# See WHISPER_HINT_ENABLED below for the one thing the NPU cannot do.
+WHISPER_DEVICE = "NPU"
+
+# Folder holding the OpenVINO-format model. Not the same file as the
+# faster-whisper one: OpenVINO wants its own IR format (an .xml graph beside a
+# .bin of weights). Pre-converted builds are published, so nothing has to be
+# converted locally and PyTorch never needs installing:
+#
+#     huggingface-cli download OpenVINO/whisper-base.en-fp16-ov \
+#         --local-dir LIA/models/openvino/whisper-base.en-fp16
+#
+# For small.en, swap "base" for "small" in both the repo id and the folder.
+WHISPER_OV_MODEL = BASE_DIR / "models" / "openvino" / "whisper-base.en-fp16"
+
+# Where OpenVINO keeps the compiled model.
+#
+# Not optional in practice. Compiling Whisper for the NPU takes 19s, and for
+# the iGPU 16s -- every startup, without this. With it, the compile happens
+# once and later starts load in 1.4s. Delete the folder to force a recompile
+# after a driver update.
+WHISPER_OV_CACHE = DATA_DIR / "ov_cache"
+
+# Whether to pass Whisper the short vocabulary hint (names it would otherwise
+# spell phonetically).
+#
+# Off, because the NPU cannot accept it. A prompt makes the decoder's input a
+# different length each call, and the NPU compiles to fixed shapes -- asking
+# for one doesn't degrade, it raises outright:
+#
+#     RuntimeError: Check '*roi_end <= *max_dim' failed
+#
+# CPU and iGPU both accept it fine, so turn this back on if WHISPER_DEVICE is
+# either of those.
+#
+# Losing it costs less than it looks. Measured on the same clip, the hint made
+# no difference to the transcription on any of the three devices -- "Anaya"
+# came through correctly without it, and "Lia" came through as "Leah" with it.
+# WAKE_WORDS already lists "leah" precisely because that spelling was expected,
+# so the wake word still matches. Worth re-testing against a real microphone
+# and real names before treating this as settled: the measurement above was
+# made against synthesised speech, which is cleaner than a room.
+WHISPER_HINT_ENABLED = False
 
 # This is the distilled, load-bearing version of the LIA spec.
 # Kept short on purpose -- small local models follow short, concrete

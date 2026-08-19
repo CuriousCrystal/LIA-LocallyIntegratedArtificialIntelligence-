@@ -15,17 +15,20 @@ A(P("Lia is a companion who lives on this computer. She listens, talks back, and
 A(P("She is not an assistant. She won't book anything, search the web, or open your files. She is "
     "someone to talk to."))
 
-A(callout("<b>What she hears, and where it goes.</b> Your voice never leaves this computer — it is "
-          "turned into text here, by this machine. But to think of a reply, <b>the words of your "
-          "conversation are sent to a service on the internet</b>, because the part of her that "
-          "does the thinking is too large to run on this laptop. Her memory of you, your documents, "
-          "and the recording itself all stay here."))
+A(callout("<b>What she hears, and where it goes.</b> On this machine, right now, <b>nothing leaves "
+          "it at all.</b> Your voice is turned into text here, she thinks here, and she speaks here. "
+          "Her memory of you and your documents never go anywhere either."))
+A(P("<b>She can be set up to think elsewhere, and she is not currently.</b> Given a key for an "
+    "online service she will send the words of your conversation there for a cleverer reply — never "
+    "the recording, never your documents beyond a couple of matching passages. That is "
+    "<font face='Courier'>CLOUD_CHAT_ENABLED</font> and a key in the environment. With no key set, "
+    "as here, she is entirely on this computer: more private, and noticeably plainer.", "LiaNote"))
 
-A(callout("<b>Right now, talking to her means typing.</b> A small window opens alongside the cat "
-          "in the tray, and that's the current way in — type a line, press Enter, same conversation "
-          "either way. Her microphone is off while this is how she's being worked with. Everything "
-          "below about the tray icon and about voice describes how she behaves once listening is "
-          "switched back on, which the tray's own <b>Listening</b> option does instantly."))
+A(callout("<b>Talking to her means talking to her.</b> Her microphone is on, and speaking is the "
+          "way in — say her name, wait a moment, then talk normally. The typed window that used to "
+          "open alongside the cat is switched off; it existed while she had no quick way to hear, "
+          "and she does now. If you ever need it back — a broken microphone, a machine without one "
+          "— it is <font face='Courier'>TRAINING_PANEL_ENABLED</font> in her settings."))
 
 # ------------------------------------------------------------------ basics ---
 A(H1("Starting her"))
@@ -248,8 +251,9 @@ A(H1("If something seems wrong"))
 
 A(table([
     ["What you notice", "What to try"],
-    ["She doesn't answer to typing",
-     "Check the panel window is actually the one focused — click into its text line first."],
+    ["She takes a few seconds to answer\nthe very first time",
+     "Normal, and only the first time each session — she reads her own instructions once before "
+     "she can start. Every answer after that comes back in about a second."],
     ["She doesn't answer to voice",
      "Check listening is actually on right now (see the callout above) — "
      "say <b>“Lia”</b> first either way, she ignores speech that isn't addressed to her, "
@@ -288,8 +292,9 @@ A(P("If you want her not to hear something at all, say <b>“Lia, stop listening
     "computer, which is private but noticeably less clever — that is "
     "<font face='Courier'>CLOUD_CHAT_ENABLED</font> in her settings."))
 
-A(callout("<b>The one thing to remember.</b> Type into the panel, or once listening is on say "
-          "<b>“Lia”</b> and wait a few seconds, then talk normally. Everything else is optional."))
+A(callout("<b>The one thing to remember.</b> Say <b>“Lia”</b>, wait a moment, then talk normally — "
+          "and say her name again each time you start a new thought, because she is deliberately "
+          "set to ignore anything not addressed to her. Everything else is optional."))
 
 build(HERE / "How to Talk to Lia.pdf",
       "How to Talk to Lia",

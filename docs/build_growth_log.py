@@ -412,6 +412,62 @@ A(P("<b>The dot became a cat.</b> Purple, filled when listening, hollow when not
     "that meant the same thing but only by convention. A cat with its mouth open reads as "
     "<i>speaking</i> without having to already know what the shape used to mean.", "LiaNote"))
 
+A(PageBreak())
+
+A(H1("Stage 5 — Losing the graphics card"))
+A(P("She moved to a different machine: a Core Ultra 7 255U with twelve cores, 16GB of LPDDR5X-8533, "
+    "an integrated GPU, an NPU, and no discrete graphics card at all. Everything measured up to this "
+    "point had been measured on a machine with a 4GB card, and a good deal of the design was shaped "
+    "around that card's limits — <font face='Courier'>NUM_CTX</font> chosen to fit it, Whisper "
+    "deliberately kept off it, models sized against it."))
+A(P("The expectation was that she would get slower and that this stage would be about damage. It "
+    "wasn't, and the reason is worth keeping."))
+
+A(H2("Why a laptop with no graphics card kept up"))
+A(P("Generating text is limited by <b>memory bandwidth</b>, not by processing power: producing each "
+    "token means reading the whole model out of memory, so the processor spends most of its time "
+    "waiting. LPDDR5X-8533 supplies roughly 136 GB/s — the same order as the 4GB card's VRAM. "
+    "Generation came in at 21 tokens a second, against the roughly 5 a second she can actually "
+    "speak. Her voice is the bottleneck; the model is not."))
+A(P("<b>What the graphics card was really buying was separation, not speed.</b> It was somewhere to "
+    "put the language model that wasn't competing with everything else — and that is the thing "
+    "actually lost here, not throughput.", "LiaNote"))
+
+A(H2("Giving hearing its own silicon back"))
+A(P("The old note beside <font face='Courier'>WHISPER_MODEL</font> said Whisper ran on the CPU "
+    "<i>so it wouldn't compete with Ollama for the VRAM</i>. On the new machine that sentence "
+    "inverts: with no card, hearing and thinking both wanted the CPU and genuinely fought over it."))
+A(P("But the chip has an NPU — a processor built for fixed-shape neural work — and it was doing "
+    "nothing at all. Speech recognition is exactly that shape. Whisper moved onto it through "
+    "OpenVINO, and the separation the design had always assumed was restored on hardware already "
+    "paid for."))
+A(table([
+    ["Whisper base.en, warm, best of 3", "2.3s", "5.4s", "14.9s"],
+    ["faster-whisper, CPU (was)", "0.55s", "0.59s", "0.69s"],
+    ["OpenVINO, NPU (now)", "0.11s", "0.16s", "0.31s"],
+], [220, 72, 72, 72]))
+A(P("Worth recording that OpenVINO on the <i>CPU</i> measured barely better than what it replaced, "
+    "and worse on the long clip. The runtime was not the win. Moving off the contended processor "
+    "was.", "LiaNote"))
+
+A(H2("A five-second wait that was never the model thinking"))
+A(P("Her first reply of a session took 7.68s to begin, and every reply after it took about one. "
+    "That shape is the tell: nothing about a model gets three times faster on its second use unless "
+    "something is being cached."))
+A(P("It was. Generation was steady at 21 tok/s the whole time — the delay was her 575-token system "
+    "prompt being <i>read</i>, at about 110 tok/s. Ollama caches the prompt prefix, so the cost is "
+    "paid once per session and never again."))
+A(P("The fix was not a shorter prompt. <font face='Courier'>llm.warm_up()</font> had been sending "
+    "an empty message list — which loads the model's weights but never reads a prompt — so the "
+    "existing prewarm was warming the cheap half and leaving the expensive half for whoever spoke "
+    "first. It now sends her real system message, during startup, when nobody is waiting. "
+    "<b>7.46s to 2.35s.</b>", "LiaNote"))
+A(callout("<b>The lesson that generalises:</b> both of this stage's real wins came from measuring "
+          "the two halves of a slow thing separately — reading versus writing, runtime versus "
+          "processor — rather than treating “it is slow” as one number. Neither fix would have been "
+          "findable from the total alone, and one of them (a shorter system prompt) would have been "
+          "the obvious wrong answer."))
+
 A(H2("Not yet built"))
 A(bullets([
     "Opening or closing applications.",

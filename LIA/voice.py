@@ -34,6 +34,11 @@ from config import (
     SYSTEM_VOICE_MATCH,
     VOICE_ENGINE,
     WHISPER_MODEL,
+    WHISPER_BACKEND,
+    WHISPER_DEVICE,
+    WHISPER_OV_MODEL,
+    WHISPER_OV_CACHE,
+    WHISPER_HINT_ENABLED,
     VAD_THRESHOLD,
     VAD_SILENCE_SECONDS,
     VAD_MIN_SPEECH_SECONDS,
@@ -376,12 +381,20 @@ class SentenceBuffer:
 # -------------------------------------------------------------- listening ---
 
 class Listener:
-    """Push-to-talk speech recognition via faster-whisper (CPU)."""
+    """Speech recognition -- OpenVINO on the NPU, or faster-whisper on the CPU.
+
+    Which one is decided by WHISPER_BACKEND, and settled once at load time
+    rather than per call: `self.backend` is the answer to "what actually
+    loaded", not "what was asked for". Everything downstream reads that.
+    """
 
     def __init__(self, model_size: str = WHISPER_MODEL):
         self.model_size = model_size
         self._model = None
         self._vad = None
+        # Set by _ensure_model() to whichever backend really came up, so a
+        # failed OpenVINO load leaves the rest of the class telling the truth.
+        self.backend: str | None = None
         # The raw int16 samples behind the most recent transcription -- a
         # side channel rather than a return-value change, since changing
         # listen_open()/listen() to return tuples would touch every call site.
@@ -391,13 +404,58 @@ class Listener:
     def _ensure_model(self) -> bool:
         if self._model is not None:
             return True
+
+        if WHISPER_BACKEND == "openvino" and self._load_openvino():
+            return True
+
+        return self._load_faster_whisper()
+
+    def _load_openvino(self) -> bool:
+        """Whisper through OpenVINO, on whichever processor WHISPER_DEVICE names.
+
+        Returns False rather than raising on any problem -- a missing package,
+        a missing model folder, a driver that won't compile. The caller falls
+        back to faster-whisper, which is the point: putting her ears on the NPU
+        should never be the reason she can't hear.
+        """
+        model_dir = Path(WHISPER_OV_MODEL)
+        if not model_dir.exists():
+            print(f"[voice] no OpenVINO model at {model_dir} -- falling back to faster-whisper")
+            return False
+
+        try:
+            import openvino_genai
+        except ImportError:
+            print("[voice] openvino-genai not installed -- falling back to faster-whisper")
+            return False
+
+        try:
+            label = f"{model_dir.name} on {WHISPER_DEVICE}"
+            print(f"  ...loading speech recognition ({label})".ljust(56), end="\r", flush=True)
+            cache = Path(WHISPER_OV_CACHE)
+            cache.mkdir(parents=True, exist_ok=True)
+            # CACHE_DIR is what turns a 19s NPU compile into a 1.4s load. Without
+            # it that compile is paid at every single startup.
+            self._model = openvino_genai.WhisperPipeline(
+                str(model_dir), device=WHISPER_DEVICE, CACHE_DIR=str(cache)
+            )
+            self.backend = "openvino"
+            print(" " * 56, end="\r", flush=True)
+            return True
+        except Exception as exc:
+            print(f"[voice] OpenVINO on {WHISPER_DEVICE} unavailable ({exc}) -- falling back")
+            self._model = None
+            return False
+
+    def _load_faster_whisper(self) -> bool:
         try:
             from faster_whisper import WhisperModel
 
-            print(f"  ...loading speech recognition ({self.model_size})".ljust(48), end="\r", flush=True)
+            print(f"  ...loading speech recognition ({self.model_size})".ljust(56), end="\r", flush=True)
             # int8 on CPU keeps the GPU free for Ollama.
             self._model = WhisperModel(self.model_size, device="cpu", compute_type="int8")
-            print(" " * 48, end="\r", flush=True)
+            self.backend = "faster-whisper"
+            print(" " * 56, end="\r", flush=True)
             return True
         except Exception as exc:
             print(f"[voice] speech recognition unavailable: {exc}")
@@ -553,10 +611,30 @@ class Listener:
     def _transcribe(self, audio, hint: str | None) -> str | None:
         print("  ...transcribing".ljust(40), end="\r", flush=True)
         audio_f32 = audio.astype("float32") / 32768.0
-        segments, _ = self._model.transcribe(
-            audio_f32, beam_size=1, language="en", initial_prompt=hint
-        )
-        text = " ".join(s.text for s in segments).strip()
+
+        if self.backend == "openvino":
+            # The hint is dropped on the NPU, and only there. A prompt makes the
+            # decoder input a different length each call and the NPU compiles to
+            # fixed shapes, so asking for one raises rather than degrading.
+            # WHISPER_HINT_ENABLED carries the reasoning and the measurements.
+            kwargs = {}
+            if hint and WHISPER_HINT_ENABLED:
+                kwargs["initial_prompt"] = hint
+            try:
+                text = str(self._model.generate(audio_f32, **kwargs)).strip()
+            except Exception as exc:
+                # Never lose the utterance over a backend problem: say what
+                # happened and let her act on nothing, the same as silence.
+                print(" " * 40, end="\r", flush=True)
+                print(f"[voice] transcription failed on {WHISPER_DEVICE}: {exc}")
+                return None
+        else:
+            segments, _ = self._model.transcribe(
+                audio_f32, beam_size=1, language="en",
+                initial_prompt=hint if WHISPER_HINT_ENABLED else None,
+            )
+            text = " ".join(s.text for s in segments).strip()
+
         print(" " * 40, end="\r", flush=True)
 
         if not text:

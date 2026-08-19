@@ -49,6 +49,8 @@ import speaker_id
 import voice
 from config import (
     SYSTEM_PROMPT,
+    MODEL_CHAT,
+    MODEL_EMBED,
     SHORT_TERM_TURNS,
     SPEAK_ENABLED,
     LISTEN_ENABLED,
@@ -1140,10 +1142,15 @@ def as_instruction(text: str) -> str:
     return text
 
 
-def prewarm():
-    """Begin loading the model as soon as you start speaking."""
+def prewarm(state: dict | None = None):
+    """Begin loading the model as soon as you start speaking.
+
+    Handed her real system message rather than an empty one, so the wait that
+    matters -- reading the prompt, not loading the weights -- happens while you
+    are still talking. See llm.warm_up() for the measurements.
+    """
     if PREWARM_ON_SPEECH:
-        llm.warm_up()
+        llm.warm_up([build_system_message(state)])
 
 
 def speech_hint() -> str:
@@ -1443,11 +1450,26 @@ def main(controls: "Controls | None" = None):
 
     # On autostart she wins the race against Ollama nearly every time.
     if not llm.is_up():
-        print("[waiting for Ollama...]")
-        if llm.wait_until_ready():
-            print("[Ollama is up]")
+        # Told apart on purpose. "Not installed" and "not up yet" both left her
+        # sitting silently for three minutes and then saying the same thing,
+        # and only one of them is something waiting can fix.
+        if not llm.is_installed():
+            print("[no Ollama on this machine -- she can hear and speak, but not think]")
+            print("[install it from https://ollama.com, then:"
+                  f" ollama pull {MODEL_CHAT} && ollama pull {MODEL_EMBED}]")
         else:
-            print("[Ollama unreachable -- she'll keep trying as you talk to her]")
+            print("[waiting for Ollama...]")
+            if llm.wait_until_ready():
+                print("[Ollama is up]")
+            else:
+                print("[Ollama unreachable -- she'll keep trying as you talk to her]")
+
+    # Read the prompt now, in the background, while the rest of startup is
+    # still going on. PREWARM_ON_SPEECH already does this when you start
+    # talking, which covers every turn but the first -- and the first is the
+    # expensive one, because nothing is cached yet. Startup is dead time
+    # nobody is waiting through, so it is the right place to spend it.
+    prewarm(state)
 
     stop_watchdog = threading.Event()
     start_idle_watchdog(session, stop_watchdog, state)
@@ -1601,7 +1623,19 @@ def main(controls: "Controls | None" = None):
             # rank passages once it has them; it cannot tell that the question
             # was never about a book in the first place -- and with a novel
             # indexed, every ordinary sentence found something.
-            if judge.wants_library(user_input):
+            #
+            # But only asked when there is something to search. The judge is a
+            # real model call, and on this machine it costs 2.3-2.9s measured
+            # across six phrasings -- on *every* turn, to decide whether to look
+            # in a library that may hold nothing at all. The outer condition
+            # above lets it through whenever REMEMBER_CONVERSATION is on, which
+            # is now the normal case, so an empty library was paying that every
+            # single time to be told there was nothing to find.
+            #
+            # This is the same argument the comment above makes about the
+            # embedding call, applied to the more expensive question underneath
+            # it: don't ask whether to search something that isn't there.
+            if db.document_titles() and judge.wants_library(user_input):
                 status("checking her reading")
                 lib_context = build_library_context(user_input, query_vec=query_vec)
                 if lib_context:

@@ -1,9 +1,12 @@
 import json
+import os
+import shutil
 import subprocess
 import threading
 import time
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 
@@ -20,19 +23,77 @@ def is_up(timeout: float = 3.0) -> bool:
         return False
 
 
+def find_binary() -> str | None:
+    """Full path to ollama.exe, or None if it isn't on this machine at all.
+
+    PATH alone is not a good enough test, and getting that wrong is worse than
+    not checking. The installer adds Ollama to PATH, but a process that started
+    before it did -- or any process launched from Explorer, which hands on a
+    copy of the environment as it was at sign-in -- carries the old PATH until
+    the next login. Ollama can be installed, running, and answering requests
+    while shutil.which() still says no. Seen exactly that, an hour after a
+    winget install.
+    """
+    found = shutil.which("ollama")
+    if found:
+        return found
+
+    candidates = [
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe",
+        Path(os.environ.get("ProgramFiles", "")) / "Ollama" / "ollama.exe",
+        Path(os.environ.get("ProgramW6432", "")) / "Ollama" / "ollama.exe",
+        Path.home() / ".ollama" / "ollama.exe",
+        Path("/usr/local/bin/ollama"),
+        Path("/usr/bin/ollama"),
+    ]
+    for path in candidates:
+        try:
+            if path.is_file():
+                return str(path)
+        except OSError:
+            continue
+    return None
+
+
+def is_installed() -> bool:
+    """Is there an Ollama on this machine for us to wait for?"""
+    return find_binary() is not None
+
+
+def _serving_locally() -> bool:
+    """Is OLLAMA_URL this machine? If not, a missing local binary means nothing."""
+    try:
+        host = (urlparse(OLLAMA_URL).hostname or "").lower()
+    except ValueError:
+        return True
+    return host in {"127.0.0.1", "localhost", "::1", "0.0.0.0", ""}
+
+
 def wait_until_ready(total_seconds: float = 180, try_launch: bool = True) -> bool:
     """Block until Ollama answers, optionally starting it.
 
     On autostart she'll almost always beat Ollama to the login -- without this
-    she'd crash on her very first sentence every single boot.
+    she'd crash on her very first sentence every single boot. That is what the
+    long wait is for, and it is worth having.
+
+    What it is *not* for is a machine with no Ollama on it. There the wait can
+    only ever end in the same failure three minutes later, with her unable to
+    say so until it does. So: waiting is for something that is coming, and if
+    nothing is coming we say so now.
+
+    Only ever gives up early when the binary is absent *and* OLLAMA_URL points
+    at this machine -- pointed at another host, whether there's a copy here is
+    beside the point and the wait stands.
     """
     if is_up():
         return True
 
-    if try_launch:
+    binary = find_binary()
+
+    if try_launch and binary:
         try:
             subprocess.Popen(
-                ["ollama", "serve"],
+                [binary, "serve"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
@@ -43,7 +104,10 @@ def wait_until_ready(total_seconds: float = 180, try_launch: bool = True) -> boo
                 cwd=str(Path.home()),
             )
         except Exception:
-            pass  # not installed, or not on PATH -- fall through and keep waiting
+            pass  # couldn't launch it -- it may still be coming up on its own
+
+    if binary is None and _serving_locally():
+        return False
 
     deadline = time.monotonic() + total_seconds
     while time.monotonic() < deadline:
@@ -372,11 +436,27 @@ def unload():
         pass  # nothing to free if Ollama isn't there
 
 
-def warm_up():
+def warm_up(messages: list[dict] | None = None):
     """Start loading the chat model without waiting for it.
 
     Fired the moment speech is detected, so the reload overlaps with
     transcription instead of running after it.
+
+    Pass her real system message and this does a second, larger job: it primes
+    Ollama's prompt cache. Sending [] loads the weights but leaves the prompt
+    unread, and the prompt is where the wait actually is -- measured on a Core
+    Ultra 7 255U with gemma2:2b, her 575-token system prompt is read at about
+    110 tok/s cold, which is 5.3 seconds before she says a word. Once those
+    tokens are cached the same prompt costs 0.13s, and every later turn in the
+    session reuses the prefix:
+
+        turn 1   7.68s to first word      <- this, paid once
+        turn 2   0.99s
+        turn 3   0.92s
+
+    So the fix is not a shorter prompt, it is paying for it before she is
+    listening rather than while someone waits. num_predict=1 because the point
+    is to have the prompt read, not to have an answer.
     """
     def go():
         try:
@@ -384,9 +464,10 @@ def warm_up():
                 f"{OLLAMA_URL}/api/chat",
                 json={
                     "model": MODEL_CHAT,
-                    "messages": [],
+                    "messages": messages or [],
                     "keep_alive": OLLAMA_KEEP_ALIVE,
-                    "options": OPTIONS,
+                    "options": {**OPTIONS, "num_predict": 1},
+                    "stream": False,
                 },
                 timeout=120,
             )

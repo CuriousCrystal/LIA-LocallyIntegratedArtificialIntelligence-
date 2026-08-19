@@ -45,3 +45,19 @@ extracted/
 intent_log.jsonl
 # database backups
 *.bak-*
+
+# Virtual environment. Not committed for the usual reasons -- it is large,
+# platform-specific, and rebuildable from requirements.txt.
+.venv/
+venv/
+
+# OpenVINO model files, downloaded rather than committed -- same reasoning as
+# the .onnx rules above, and the same fetch instructions in config.py beside
+# WHISPER_OV_MODEL. ~154MB for base.en, past GitHub's 100MB per-file refusal
+# once the weights are in one .bin.
+LIA/models/openvino/
+
+# OpenVINO's compiled-model cache. Rebuilt automatically on first run, and
+# specific to this exact CPU, driver version and OpenVINO build -- so it is
+# not merely large (~360MB), it is actively wrong on any other machine.
+ov_cache/
