@@ -39,7 +39,6 @@ import db
 import diary
 import intent
 import internet
-import judge
 import library
 import llm
 import media
@@ -1619,23 +1618,15 @@ def main(controls: "Controls | None" = None):
                 if mem_context:
                     messages.append(mem_context)
 
-            # Asked before searching, not after. The similarity floor can only
-            # rank passages once it has them; it cannot tell that the question
-            # was never about a book in the first place -- and with a novel
-            # indexed, every ordinary sentence found something.
+            # Searched whenever there is something to search. The judge used to
+            # stand in front of this, deciding first whether the question was
+            # about a document at all -- it is off now (see JUDGE_ENABLED), so
+            # LIBRARY_MIN_SCORE is doing that job alone at a raised floor.
             #
-            # But only asked when there is something to search. The judge is a
-            # real model call, and on this machine it costs 2.3-2.9s measured
-            # across six phrasings -- on *every* turn, to decide whether to look
-            # in a library that may hold nothing at all. The outer condition
-            # above lets it through whenever REMEMBER_CONVERSATION is on, which
-            # is now the normal case, so an empty library was paying that every
-            # single time to be told there was nothing to find.
-            #
-            # This is the same argument the comment above makes about the
-            # embedding call, applied to the more expensive question underneath
-            # it: don't ask whether to search something that isn't there.
-            if db.document_titles() and judge.wants_library(user_input):
+            # The document check stays and is not merely an optimisation: with
+            # nothing indexed there is nothing to rank, and the search would
+            # walk an empty table to return an empty list every turn.
+            if db.document_titles():
                 status("checking her reading")
                 lib_context = build_library_context(user_input, query_vec=query_vec)
                 if lib_context:

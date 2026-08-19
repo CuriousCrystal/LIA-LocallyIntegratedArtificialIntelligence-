@@ -140,10 +140,15 @@ A(P("<font face='Courier'>llm.warm_up()</font> was sending an empty message list
 
 A(H2("Two smaller things the move surfaced"))
 A(bullets([
-    "<b>The judge ran on every turn regardless of whether anything was indexed.</b> It costs a "
-    "model call — 2.3–2.9s here, against 0.47s on the old machine — and an empty library was paying "
-    "it every turn to be told there was nothing to find. Now gated on "
-    "<font face='Courier'>db.document_titles()</font> first.",
+    "<b>The judge is off.</b> It cost a model call on every turn — 2.3–2.9s here against 0.47s on "
+    "the old machine — to decide whether to spend 0.05s searching. It had also quietly got less "
+    "accurate, since <font face='Courier'>JUDGE_MODEL</font> follows "
+    "<font face='Courier'>MODEL_CHAT</font> and gemma2:2b scored 11/12 against llama3.2:3b's 35/36. "
+    "Re-measuring the thing judge.py says cannot work — a score floor — found the populations now "
+    "overlap by one question rather than throughout, so "
+    "<font face='Courier'>LIBRARY_MIN_SCORE</font> went 0.45 to 0.52 and took the job: 15/16 at "
+    "45ms, against 11/12 at 2.5s. Measured on three short documents, not the novel the original "
+    "overlap came from, so this gets worse as the library grows.",
     "<b>A missing Ollama hung startup for the full three minutes.</b> The wait exists because she "
     "beats Ollama to the login on autostart, which is worth keeping; waiting for something that "
     "was never installed is not. Now detected and reported in about two seconds — carefully, "

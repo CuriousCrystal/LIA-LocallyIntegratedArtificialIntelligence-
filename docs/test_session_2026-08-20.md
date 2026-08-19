@@ -94,28 +94,57 @@ Synthesis runs at about **26x realtime** once warm — 0.18s to produce 4.7s of
 speech. Cold, the first call is 5.8s. Both measured through `voice.Speaker`, not
 a reimplementation.
 
-## One real finding: the judge on every turn
+## The judge, gated and then removed
 
-The judge was measured at 2.3–2.9s per call across six phrasings, consistently,
-warm. It was 0.47–0.53s on the old machine. It is also 6-for-6 correct here, so
-this is a cost finding, not an accuracy one.
+The judge measured 2.3–2.9s per call across six phrasings, consistently, warm.
+It was 0.47–0.53s on the old machine — a 15W CPU doing what a graphics card used
+to, not the model getting worse.
 
-The problem is where it sat. `main()` reached it whenever `REMEMBER_CONVERSATION`
-was on — which is now the normal case — regardless of whether any document was
-indexed. So an empty library paid ~2.5s **every turn** to be told there was
-nothing to find.
+It was first *gated*: `main()` reached it whenever `REMEMBER_CONVERSATION` was on,
+regardless of whether anything was indexed, so an empty library paid ~2.5s every
+turn to be told there was nothing to find. Adding `db.document_titles() and` in
+front fixed that case.
 
-Fixed by asking whether there is anything to search before asking whether to
-search it:
+Then it was **switched off entirely**, because the gate only helped an empty
+library and the cost returned the moment real documents existed. Two things
+decided it:
 
-```python
-if db.document_titles() and judge.wants_library(user_input):
+**It had quietly got less accurate.** `JUDGE_MODEL = MODEL_CHAT`, so dropping to
+gemma2:2b took the judge with it — 11/12 here against the 35/36 measured for
+llama3.2:3b. The miss fails *closed*: "how tall is the lighthouse" was answered
+without opening the book, while retrieval itself found the passage 5/5. The judge
+was the weak link, not the search.
+
+**A score floor turned out to work after all, on this library.** `judge.py` argues
+it cannot, and against a 671-passage novel it could not. Re-measured here on three
+short documents, 8 real questions against 8 ordinary ones:
+
+```
+real questions     0.484 ─────────────────────── 0.675
+small talk         0.390 ───────── 0.506
+                                ^^^ overlap: 0.484-0.506, one question wide
 ```
 
-Verified both ways: 0.001s with an empty library, and the judge still runs
-normally (2.28s, correct verdict) once a document is indexed. This is the same
-argument the comment above it already makes about the embedding call, applied to
-the more expensive question underneath it.
+They still overlap, but narrowly enough that a floor at **0.52** keeps 7 of 8 real
+questions and blocks 8 of 8 small talk. `LIBRARY_MIN_SCORE` went 0.45 → 0.52 and
+`JUDGE_ENABLED` went off.
+
+| | correct | per turn |
+|---|---:|---:|
+| judge at `LIBRARY_MIN_SCORE = 0.45` | 11/12 | 2.5s |
+| score floor at 0.52, no judge | **15/16** | **45ms** |
+
+Across the 16 test turns the judge would have added 40 seconds. Leaving 0.45 in
+place with the judge gone was measured too, and is the trap: four of six ordinary
+sentences pulled the documents in, up to 1004 characters of a lighthouse story in
+front of "I had a really long day at work."
+
+**The caveat that matters:** this was measured on three short documents, not the
+novel the original overlap came from. More text means more chances for an
+unrelated passage to score well, so the trade gets worse as the library grows.
+The question it already loses — "what did her father teach her", 0.484 — is the
+shape to watch: about the contents, with none of the contents' vocabulary in it.
+`JUDGE_ENABLED` is the way back.
 
 ## Five false alarms
 

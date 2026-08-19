@@ -484,21 +484,56 @@ CHUNK_OVERLAP = 150
 # Passages below this similarity are ignored -- better she says she doesn't know
 # than dredge up an unrelated paragraph because it was the closest match.
 #
-# This is now the second filter, not the first. It cannot be the first: measured
-# against a real indexed novel, a genuine question scored 0.519 and ordinary
-# small talk scored 0.583, so the two populations overlap and no floor separates
-# them. See judge.py. Left where it is to catch weak matches within a question
-# that genuinely is about the library.
-LIBRARY_MIN_SCORE = 0.45
+# This is the only filter again, now the judge is off, and it was raised from
+# 0.45 to take that job on.
+#
+# 0.45 was chosen when the judge stood in front of it and it only had to catch
+# weak matches inside a question that was already known to be about the library.
+# Left there with the judge gone, it let four of six ordinary sentences pull the
+# documents in -- a thousand characters of a lighthouse story in front of "I had
+# a really long day at work".
+#
+# Re-measured on the current library, 8 real questions against 8 ordinary ones:
+#
+#     real questions     0.484 ... 0.675
+#     small talk         0.390 ... 0.506
+#
+# They do still overlap, exactly as judge.py says -- but only between 0.484 and
+# 0.506, and only one real question falls in it. A floor of 0.52 keeps 7 of 8
+# real questions and blocks 8 of 8 small talk: 15/16, against the judge's 11/12,
+# for free.
+#
+# The one it loses ("what did her father teach her", 0.484) is the shape to
+# watch: a question about the contents with none of the contents' vocabulary in
+# it. If those matter more than the latency, JUDGE_ENABLED is the way back.
+LIBRARY_MIN_SCORE = 0.52
 
 # --- the judge ---
 # One closed question, asked before the expensive work runs: "is this person
-# asking about a document?". See judge.py for why a similarity floor cannot
-# answer it.
+# asking about a document?". See judge.py for why it was built.
 #
-# Off: every turn searches the library again, which is what put five hundred
-# tokens of somebody else's novel in front of every "how was your day".
-JUDGE_ENABLED = True
+# Off. It was costing a whole model call on every turn -- 2.3-2.9s measured
+# across six phrasings on this machine, against 0.49s on the old one. That is
+# not the model getting worse, it is a 15W CPU doing what a graphics card used
+# to; and it was 2.5s spent to decide whether to spend 0.05s searching.
+#
+# It also got quietly less accurate in the move. JUDGE_MODEL follows MODEL_CHAT,
+# so dropping to gemma2:2b took the judge down with it: 11/12 here against the
+# 35/36 llama3.2:3b measured. The miss fails *closed* -- "how tall is the
+# lighthouse" was answered without opening the book at all.
+#
+# What replaces it is LIBRARY_MIN_SCORE, raised to 0.52. That is the thing
+# judge.py argues cannot work, and against a whole novel it could not. Against
+# this library it does: re-measured, the two populations no longer overlap
+# enough to matter, and a floor at 0.52 was slightly *more* accurate than the
+# judge it replaces, at no cost at all.
+#
+# The honest caveat is that this was measured on three short documents, not the
+# 671-passage novel the original overlap came from. More text means more chances
+# for an unrelated passage to score well, so this trade gets worse as the library
+# grows -- and the point at which it stops holding is a re-measurement, not a
+# guess. Turn this back on if she starts quoting a book at small talk again.
+JUDGE_ENABLED = False
 
 # The chat model does the judging. A dedicated small model was tried first, on
 # the assumption that a yes/no shouldn't need the big one -- qwen2.5:0.5b, 400MB,

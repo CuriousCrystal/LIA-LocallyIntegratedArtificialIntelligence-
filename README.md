@@ -235,7 +235,8 @@ Set the key in the environment, never in a file:
 | `OLLAMA_URL` | **must be `127.0.0.1`, never `localhost`.** Ollama binds to IPv4; resolving `localhost` on Windows tries `::1` first and the failed attempt costs ~2s on *every* request. Measured: 2.38s vs 0.35s. |
 | `CLOUD_CHAT_ENABLED` | off = fully local, faster, private, less capable |
 | `CLOUD_HISTORY_TURNS` / `CLOUD_LIBRARY_TOP_K` | how much context a billed turn carries — the spend is in what's sent, not what returns |
-| `JUDGE_ENABLED` | off = every turn searches your library again, which put 500 tokens of novel in front of "how was your day". It costs a model call — 2.3–2.9s measured on the 255U — so it is skipped entirely when nothing is indexed. |
+| `JUDGE_ENABLED` | **currently off.** It cost a model call on every turn — 2.3–2.9s on the 255U against 0.49s on the old machine — to decide whether to spend 0.05s searching. `LIBRARY_MIN_SCORE` does the job alone now. Turn it back on if she starts quoting a book at small talk. |
+| `LIBRARY_MIN_SCORE` | raised to `0.52` to take over from the judge. Measured 15/16 against the judge's 11/12 on the same questions, at 45ms instead of 2.5s — but on a small library. Re-measure if yours grows. |
 | `NUM_CTX` | 8192 keeps her mostly on the GPU on a 4GB card. Ollama's 32k default spills 63% to CPU. Check with `ollama ps`. On a CPU-only machine this is ordinary RAM instead, and 8192 is still a sensible size. |
 | `OLLAMA_KEEP_ALIVE` | `-1` keeps her loaded indefinitely, avoiding a 9s cold start. With no discrete card that memory is your ordinary RAM, so `"30m"` is the kinder setting on a laptop. |
 | `VAD_SILENCE_SECONDS` | raise if she cuts you off mid-thought |
