@@ -79,12 +79,16 @@ USING_GEMINI_STT = bool(GEMINI_API_KEY) and "generativelanguage" in OPENAI_BASE_
 # One model knob per capability, so any of them moves without touching the
 # others. Defaults match the winning provider.
 #
-# Gemini: gemini-2.0-flash is the free-tier workhorse -- sub-second first
-# token. gemini-2.5-flash is the more capable upgrade if quota allows.
+# Gemini: the compat layer buffers each reply and delivers it in one burst
+# (measured 2026-09-23: streaming granularity is identical to non-streaming),
+# so her perceived latency is the full-reply time -- which makes the lite
+# model the right default: gemini-3.5-flash-lite answered in ~1.2s while
+# gemini-3.5-flash / the -latest alias took 8s+ and 503'd under load. Upgrade
+# to gemini-flash-latest for richer conversation if its latency ever improves.
 # Groq: llama-3.3-70b-versatile / whisper-large-v3, as before.
 if GEMINI_API_KEY:
-    OPENAI_CHAT_MODEL = "gemini-2.0-flash"
-    OPENAI_TRANSCRIBE_MODEL = "gemini-2.0-flash"
+    OPENAI_CHAT_MODEL = "gemini-3.5-flash-lite"
+    OPENAI_TRANSCRIBE_MODEL = "gemini-3.5-flash-lite"
 else:
     OPENAI_CHAT_MODEL = "llama-3.3-70b-versatile"
     OPENAI_TRANSCRIBE_MODEL = "whisper-large-v3"
