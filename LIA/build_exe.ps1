@@ -3,8 +3,8 @@
 #   powershell -ExecutionPolicy Bypass -File LIA\build_exe.ps1
 #
 # Produces dist\Lia\Lia.exe -- double-clickable, no console, no Python needed on
-# the machine. Ollama still has to be installed and running; the language model
-# is far too large to bundle.
+# the machine. The API key still has to be in the environment; it is never
+# bundled.
 #
 # Builds into a staging folder first and swaps at the end. Lia is usually
 # installed in Startup, so a half-written dist\Lia is something Windows will
@@ -32,19 +32,10 @@ $pyinstaller = @(
     '--workpath', (Join-Path $root 'build'),
     '--collect-all', 'piper',           # includes espeak-ng-data
     '--collect-all', 'pysilero_vad',    # includes the VAD onnx model
-    '--collect-all', 'faster_whisper',
     '--collect-all', 'onnxruntime',
-    '--collect-all', 'ctranslate2',
     '--collect-all', 'sounddevice',
-    '--collect-all', 'soundfile',
-    '--collect-all', 'pycaw',           # system volume control (Core Audio)
-    '--collect-all', 'sherpa_onnx',     # speaker recognition
     '--hidden-import', 'pystray._win32',
     '--hidden-import', 'comtypes',
-    # Imported inside a function in library.py, and the package name ("docx")
-    # doesn't match the distribution name ("python-docx"), which is exactly the
-    # combination PyInstaller is most likely to miss.
-    '--hidden-import', 'docx',
     '--paths', 'LIA',
     'LIA\app.py'
 )
@@ -61,24 +52,13 @@ if (-not (Test-Path (Join-Path $new 'Lia.exe'))) {
 $voicesSrc = Join-Path $PSScriptRoot 'voices'
 if (Test-Path $voicesSrc) { Copy-Item $voicesSrc (Join-Path $new 'voices') -Recurse -Force }
 
-# The speaker-recognition model, likewise -- not part of the PyInstaller
-# analysis since it's data, not code.
-$modelsSrc = Join-Path $PSScriptRoot 'models'
-if (Test-Path $modelsSrc) { Copy-Item $modelsSrc (Join-Path $new 'models') -Recurse -Force }
-
-# Her own music folder, so the packaged app has somewhere to look.
-$musicSrc = Join-Path $PSScriptRoot 'music'
-if (Test-Path $musicSrc) { Copy-Item $musicSrc (Join-Path $new 'music') -Recurse -Force }
-
-# Carry across whatever the live app already had, so nothing you've added or
-# said is lost in the swap.
-foreach ($keep in @('library', 'lia_memory.db')) {
+# Carry across whatever the live app already had (her log, the mascot
+# position). Nothing else persists -- there is no database.
+foreach ($keep in @('lia.log', 'mascot_pos.json')) {
     $existing = Join-Path $dist $keep
-    $seed     = Join-Path $PSScriptRoot $keep
     $rootSeed = Join-Path $root $keep
-    if (Test-Path $existing)      { Copy-Item $existing (Join-Path $new $keep) -Recurse -Force }
-    elseif (Test-Path $seed)      { Copy-Item $seed     (Join-Path $new $keep) -Recurse -Force }
-    elseif (Test-Path $rootSeed)  { Copy-Item $rootSeed (Join-Path $new $keep) -Recurse -Force }
+    if (Test-Path $existing) { Copy-Item $existing (Join-Path $new $keep) -Force }
+    elseif (Test-Path $rootSeed) { Copy-Item $rootSeed (Join-Path $new $keep) -Force }
 }
 
 # --- swap: this is the only moment the app is unavailable ---
@@ -95,11 +75,10 @@ if (Test-Path $dist) {
     foreach ($attempt in 1..8) {
         try { Remove-Item $dist -Recurse -Force -ErrorAction Stop; $freed = $true; break }
         catch {
+            # Most common cause: the running Lia.exe still holds the folder
+            # (antivirus scanning new files can hold it briefly too).
             if ($attempt -eq 1) {
-                # Ollama's workers get launched as children of the app and
-                # inherit its folder, holding handles inside it.
-                Write-Host "Folder locked -- stopping Ollama workers..." -ForegroundColor Yellow
-                Get-Process llama-server, ollama -ErrorAction SilentlyContinue | Stop-Process -Force
+                Write-Host "Folder locked -- is Lia still running or scanning?" -ForegroundColor Yellow
             }
             Start-Sleep -Seconds 4
         }

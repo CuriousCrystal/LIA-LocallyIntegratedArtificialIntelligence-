@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import main as lia
 import panel as panel_module
-from config import IDLE_MINUTES, DATA_DIR, TRAINING_PANEL_ENABLED
+from config import IDLE_MINUTES, DATA_DIR, TRAINING_PANEL_ENABLED, MASCOT_ENABLED
 
 # DATA_DIR, not __file__: inside a packaged .exe __file__ lives in a temporary
 # unpack folder that's deleted on exit, taking the log with it.
@@ -152,6 +152,14 @@ class LiaApp:
         self.icon = None
         self._thread = None
         self.panel = None
+        self.mascot = None
+        # The mascot and the training panel both want the main thread for a
+        # Tkinter loop; only one can have it. The panel is off by default and
+        # is the fallback for a machine with no mic, so it wins when both are
+        # asked for.
+        self.use_mascot = MASCOT_ENABLED and not TRAINING_PANEL_ENABLED
+        if MASCOT_ENABLED and TRAINING_PANEL_ENABLED:
+            print("[mascot disabled: the training panel is on and needs the same thread]")
         if TRAINING_PANEL_ENABLED:
             # Created here, not in run(): cli() needs it to exist before the
             # log redirect is set up, so the very first startup line printed
@@ -181,9 +189,6 @@ class LiaApp:
             speaker.drop_pending()
         self._refresh()
 
-    def close_out(self, *_):
-        self.controls.close_now.set()
-
     def open_log(self, *_):
         import os
 
@@ -198,11 +203,36 @@ class LiaApp:
             self.icon.stop()
         if self.panel is not None:
             self.panel.quit_requested.set()
+        if self.mascot is not None:
+            self.mascot.stop()
 
     def _refresh(self):
         if self.icon is not None:
             self.icon.icon = make_icon(self._listening(), self._speaking())
             self.icon.update_menu()
+
+    # -- desktop mascot --------------------------------------------------
+
+    def _mascot_state(self) -> str:
+        c = self.controls
+        if c.speaker is not None and c.speaker.is_busy() and c.speaker.enabled:
+            return "speaking"
+        if c.thinking.is_set():
+            return "thinking"
+        if self._listening():
+            return "listening"
+        return "idle"
+
+    def _mascot_menu(self):
+        return [
+            (f"Listening: {'on' if self._listening() else 'off'}", self.toggle_listening),
+            (f"Speaking: {'on' if self._speaking() else 'off'}", self.toggle_voice),
+            ("-", None),
+            ("Open log", self.open_log),
+            ("-", None),
+            ("Hide mascot", lambda: self.mascot and self.mascot.hide()),
+            ("Quit", self.quit),
+        ]
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -212,12 +242,14 @@ class LiaApp:
         except Exception:
             traceback.print_exc()
         finally:
-            # If the conversation loop dies, don't leave a zombie tray icon
-            # or a zombie panel window behind.
+            # If the conversation loop dies, don't leave a zombie tray icon,
+            # panel window, or mascot behind.
             if self.icon is not None:
                 self.icon.stop()
             if self.panel is not None:
                 self.panel.quit_requested.set()
+            if self.mascot is not None:
+                self.mascot.stop()
 
     def run(self):
         from pystray import Icon, Menu, MenuItem
@@ -231,7 +263,6 @@ class LiaApp:
             MenuItem("Listening", self.toggle_listening, checked=lambda _: self._listening()),
             MenuItem("Speaking", self.toggle_voice, checked=lambda _: self._speaking()),
             Menu.SEPARATOR,
-            MenuItem("End conversation now", self.close_out),
             MenuItem("Open log", self.open_log),
             Menu.SEPARATOR,
             MenuItem("Quit", self.quit),
@@ -239,13 +270,22 @@ class LiaApp:
 
         self.icon = Icon("Lia", make_icon(True, False), "Lia", menu)
 
-        if self.panel is not None:
-            # pystray's own docs are explicit that run() must be called from
-            # the main thread for cross-platform correctness -- except on
-            # Windows, where its backend is a per-thread Win32 message loop
-            # and running it off the main thread is documented as safe. This
-            # project is Windows-only throughout, so that's the trade taken
-            # here: pystray gives up the main thread, Tkinter needs it.
+        # pystray's docs say run() belongs on the main thread for cross-platform
+        # correctness -- except on Windows, where its backend is a per-thread
+        # Win32 message loop and running it off the main thread is documented as
+        # safe. This project is Windows-only, so when a Tkinter loop (the mascot
+        # or the panel) needs the main thread, pystray gives it up.
+        if self.use_mascot:
+            import mascot as mascot_module
+
+            self.mascot = mascot_module.Mascot(
+                state_fn=self._mascot_state,
+                on_click=self.toggle_listening,
+                menu_fn=self._mascot_menu,
+            )
+            threading.Thread(target=self.icon.run, daemon=True).start()
+            self.mascot.mainloop()
+        elif self.panel is not None:
             threading.Thread(target=self.icon.run, daemon=True).start()
             self.panel.mainloop()
         else:
@@ -254,24 +294,13 @@ class LiaApp:
         # Give her a moment to close out cleanly on the way out.
         self.controls.stop()
         if self._thread is not None:
-            self._thread.join(timeout=90)
+            self._thread.join(timeout=30)
 
 
 def cli():
     parser = argparse.ArgumentParser(description="Run Lia in the system tray.")
     parser.add_argument("--debug", action="store_true", help="keep the console and log live")
-    parser.add_argument("--no-save", action="store_true",
-                        help="don't record anything: no memories, facts or diary. "
-                             "Alarms are still set, since they're an action you asked "
-                             "for rather than history she wrote about you.")
     args = parser.parse_args()
-
-    # Set on the module rather than passed down, because main() reads it in
-    # several places. Without this the flag existed but did nothing in the
-    # packaged app, since the exe starts here and never runs main.py's own
-    # __main__ block -- so testing the .exe still wrote invented history.
-    if args.no_save:
-        lia.NO_SAVE = True
 
     # Built before the log redirect below, not after: cli() needs app.panel
     # to exist so the very first line printed reaches the window too, not
@@ -284,8 +313,6 @@ def cli():
     sys.stderr = log
 
     print(f"\n=== Lia starting (idle rollover after {IDLE_MINUTES} min) ===")
-    if args.no_save:
-        print("[--no-save: nothing this session will be remembered]")
     app.run()
     print("=== Lia stopped ===")
 

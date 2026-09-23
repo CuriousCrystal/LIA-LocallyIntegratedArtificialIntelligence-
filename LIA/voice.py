@@ -1,25 +1,33 @@
 """
 Voice for Lia -- speaking (TTS) and listening (STT).
 
-Everything here degrades gracefully. If a dependency is missing or a model
-fails to load, Lia falls back to plain text instead of crashing: a companion
-that goes quiet is better than one that dies mid-sentence.
+Speaking is local only: Piper neural TTS from the .onnx files in voices/.
+There is no cloud voice and no Windows SAPI fallback any more -- both were
+removed with the rest of her cloud-control features, and one honest failure
+("couldn't load a voice") beats two code paths where one ever drifts.
 
-Adding your own voice
----------------------
-Drop a Piper voice into LIA/voices/ as a matching pair:
+Listening is a hosted API (llm.transcribe). Everything here degrades
+gracefully: a failed transcription is treated as silence -- a companion that
+goes quiet beats one that dies mid-sentence.
+
+Voice activity detection (pysilero-vad) stays on this machine: it decides when
+you have stopped talking, before any audio is sent anywhere.
+
+Adding your own Piper voice
+---------------------------
+Drop a matching pair into LIA/voices/:
 
     voices/my_voice.onnx
     voices/my_voice.onnx.json
 
-Then set VOICE_NAME = "my_voice" in config.py (or leave it on "auto" to pick
-up whatever is in the folder). Nothing else needs to change.
+then set VOICE_NAME = "my_voice" in config.py (or "auto" to pick up whatever is
+there).
 """
 
 import collections
+import llm
 import queue
 import re
-import sys
 import threading
 from pathlib import Path
 
@@ -31,21 +39,13 @@ from config import (
     VOICE_VOLUME,
     VOICE_NOISE_SCALE,
     VOICE_NOISE_W,
-    SYSTEM_VOICE_MATCH,
-    VOICE_ENGINE,
-    WHISPER_MODEL,
-    WHISPER_BACKEND,
-    WHISPER_DEVICE,
-    WHISPER_OV_MODEL,
-    WHISPER_OV_CACHE,
-    WHISPER_HINT_ENABLED,
     VAD_THRESHOLD,
     VAD_SILENCE_SECONDS,
     VAD_MIN_SPEECH_SECONDS,
     VAD_MAX_SECONDS,
 )
 
-SAMPLE_RATE_IN = 16000  # what Whisper expects
+SAMPLE_RATE_IN = 16000  # mic capture rate, and what the transcription API is sent
 
 
 # --------------------------------------------------------------- helpers ---
@@ -116,18 +116,8 @@ def detect_wake(text: str, names) -> tuple[bool, str]:
     return True, (stripped or text)
 
 
-def available_voices() -> list[str]:
-    """Names of Piper voices sitting in the voices folder."""
-    if not Path(VOICES_DIR).is_dir():
-        return []
-    return sorted(p.stem for p in Path(VOICES_DIR).glob("*.onnx"))
-
-
 def _resolve_voice_file() -> Path | None:
-    """Pick which .onnx to load, honouring VOICE_NAME."""
-    if VOICE_NAME == "system":
-        return None
-
+    """Pick which .onnx Piper voice to load, honouring VOICE_NAME."""
     voices_dir = Path(VOICES_DIR)
     if not voices_dir.is_dir():
         return None
@@ -145,9 +135,10 @@ def _resolve_voice_file() -> Path | None:
 # --------------------------------------------------------------- engines ---
 
 class PiperEngine:
-    """Local neural TTS. This is the one that takes your own voice files."""
+    """Local neural TTS. Free, runs on the machine, flat delivery. Takes the
+    .onnx voice files in voices/."""
 
-    def __init__(self, model_path: Path):
+    def __init__(self, model_path):
         from piper import PiperVoice, SynthesisConfig
 
         self.name = model_path.stem
@@ -171,45 +162,15 @@ class PiperEngine:
             _play(np.concatenate(chunks), self.sample_rate)
 
 
-class SystemEngine:
-    """Built-in Windows SAPI voice. Always available, no downloads."""
-
-    def __init__(self):
-        import pyttsx3
-
-        self._engine = pyttsx3.init()
-        self.name = "system"
-
-        if SYSTEM_VOICE_MATCH:
-            for v in self._engine.getProperty("voices"):
-                if SYSTEM_VOICE_MATCH.lower() in v.name.lower():
-                    self._engine.setProperty("voice", v.id)
-                    self.name = v.name
-                    break
-
-        # SAPI defaults to ~200 wpm, which reads as brisk. Lia is not brisk.
-        self._engine.setProperty("rate", int(200 / VOICE_LENGTH_SCALE) - 20)
-
-    def say(self, text: str):
-        self._engine.say(text)
-        self._engine.runAndWait()
-
-
 def _build_engine():
-    """Best available engine, or None if the machine can't speak at all."""
-    if VOICE_ENGINE == "piper":
-        model_path = _resolve_voice_file()
-        if model_path is not None:
-            try:
-                return PiperEngine(model_path)
-            except Exception as exc:
-                print(f"[voice] couldn't load {model_path.name}: {exc}")
-
-    try:
-        return SystemEngine()
-    except Exception as exc:
-        print(f"[voice] no speech engine available: {exc}")
-        return None
+    """The local Piper voice, or None if the machine can't speak at all."""
+    model_path = _resolve_voice_file()
+    if model_path is not None:
+        try:
+            return PiperEngine(model_path)
+        except Exception as exc:
+            print(f"[voice] couldn't load {model_path.name}: {exc}")
+    return None
 
 
 # --------------------------------------------------------------- speaker ---
@@ -217,8 +178,8 @@ def _build_engine():
 class Speaker:
     """Speaks queued text on a background thread.
 
-    Generation on a 3B model is slow, so we start speaking the first sentence
-    while the rest of the reply is still being generated.
+    A hosted reply can stream faster than Piper speaks, so the first sentence
+    starts while the rest is still arriving.
     """
 
     def __init__(self, enabled: bool = SPEAK_ENABLED):
@@ -228,9 +189,6 @@ class Speaker:
         self._thread = None
         self._error_shown = False
         self._speaking = False
-        # What she is saying right now, plus what she just said -- used to tell
-        # her own voice coming back through the speakers from you talking.
-        self._recent = collections.deque(maxlen=3)
 
     @property
     def voice_name(self) -> str:
@@ -255,33 +213,7 @@ class Speaker:
         """True while there's audio playing or queued."""
         return self._speaking or not self._queue.empty()
 
-    def sounds_like_me(self, heard: str, ratio: float = 0.5) -> bool:
-        """Is this the tail of her own voice, picked up through the speakers?
-
-        Compares against what she is saying and just said. Cheap, and it makes
-        interrupting her workable without headphones.
-        """
-        words = set(_WORDS_ONLY.findall(heard.lower()))
-        if not words:
-            return True
-
-        mine = set()
-        for line in list(self._recent):
-            mine.update(_WORDS_ONLY.findall(line.lower()))
-        if not mine:
-            return False
-
-        overlap = len(words & mine) / len(words)
-        return overlap >= ratio
-
     def _worker(self):
-        def _duck_music(quieter: bool):
-            try:
-                import music
-                music.duck(quieter)
-            except Exception:
-                pass  # no music module, or nothing playing -- nothing to duck
-
         while True:
             text = self._queue.get()
             if text is None:
@@ -289,11 +221,6 @@ class Speaker:
                 break
             try:
                 self._speaking = True
-                self._recent.append(text)
-                # Drop her own music under her voice for the duration. Imported
-                # here rather than at module scope: music.py is optional, and
-                # voice.py has to keep working without it.
-                _duck_music(True)
                 self._engine.say(text)
             except KeyboardInterrupt:
                 pass
@@ -302,11 +229,6 @@ class Speaker:
                     print(f"\n[voice] playback failed: {exc}")
                     self._error_shown = True
             finally:
-                # Only lift it once she's actually finished the backlog, or a
-                # reply spoken as several sentences ducks and unducks between
-                # each one, which sounds like the music is broken.
-                if self._queue.empty():
-                    _duck_music(False)
                 self._speaking = False
                 self._queue.task_done()
 
@@ -322,7 +244,7 @@ class Speaker:
             self._queue.join()
 
     def drop_pending(self):
-        """Throw away anything not yet spoken (used when you interrupt her)."""
+        """Throw away anything not yet spoken."""
         try:
             while True:
                 self._queue.get_nowait()
@@ -381,85 +303,17 @@ class SentenceBuffer:
 # -------------------------------------------------------------- listening ---
 
 class Listener:
-    """Speech recognition -- OpenVINO on the NPU, or faster-whisper on the CPU.
+    """Speech recognition -- a hosted API (OPENAI_TRANSCRIBE_MODEL, via
+    llm.transcribe). The recorded utterance is sent as a WAV and comes back as
+    text.
 
-    Which one is decided by WHISPER_BACKEND, and settled once at load time
-    rather than per call: `self.backend` is the answer to "what actually
-    loaded", not "what was asked for". Everything downstream reads that.
+    The only model that loads on this machine is the voice activity detector,
+    which decides when you have stopped talking. Nothing else here needs
+    warming up.
     """
 
-    def __init__(self, model_size: str = WHISPER_MODEL):
-        self.model_size = model_size
-        self._model = None
+    def __init__(self):
         self._vad = None
-        # Set by _ensure_model() to whichever backend really came up, so a
-        # failed OpenVINO load leaves the rest of the class telling the truth.
-        self.backend: str | None = None
-        # The raw int16 samples behind the most recent transcription -- a
-        # side channel rather than a return-value change, since changing
-        # listen_open()/listen() to return tuples would touch every call site.
-        # speaker_id needs the actual audio, not just the words Whisper heard.
-        self.last_audio = None
-
-    def _ensure_model(self) -> bool:
-        if self._model is not None:
-            return True
-
-        if WHISPER_BACKEND == "openvino" and self._load_openvino():
-            return True
-
-        return self._load_faster_whisper()
-
-    def _load_openvino(self) -> bool:
-        """Whisper through OpenVINO, on whichever processor WHISPER_DEVICE names.
-
-        Returns False rather than raising on any problem -- a missing package,
-        a missing model folder, a driver that won't compile. The caller falls
-        back to faster-whisper, which is the point: putting her ears on the NPU
-        should never be the reason she can't hear.
-        """
-        model_dir = Path(WHISPER_OV_MODEL)
-        if not model_dir.exists():
-            print(f"[voice] no OpenVINO model at {model_dir} -- falling back to faster-whisper")
-            return False
-
-        try:
-            import openvino_genai
-        except ImportError:
-            print("[voice] openvino-genai not installed -- falling back to faster-whisper")
-            return False
-
-        try:
-            label = f"{model_dir.name} on {WHISPER_DEVICE}"
-            print(f"  ...loading speech recognition ({label})".ljust(56), end="\r", flush=True)
-            cache = Path(WHISPER_OV_CACHE)
-            cache.mkdir(parents=True, exist_ok=True)
-            # CACHE_DIR is what turns a 19s NPU compile into a 1.4s load. Without
-            # it that compile is paid at every single startup.
-            self._model = openvino_genai.WhisperPipeline(
-                str(model_dir), device=WHISPER_DEVICE, CACHE_DIR=str(cache)
-            )
-            self.backend = "openvino"
-            print(" " * 56, end="\r", flush=True)
-            return True
-        except Exception as exc:
-            print(f"[voice] OpenVINO on {WHISPER_DEVICE} unavailable ({exc}) -- falling back")
-            self._model = None
-            return False
-
-    def _load_faster_whisper(self) -> bool:
-        try:
-            from faster_whisper import WhisperModel
-
-            print(f"  ...loading speech recognition ({self.model_size})".ljust(56), end="\r", flush=True)
-            # int8 on CPU keeps the GPU free for Ollama.
-            self._model = WhisperModel(self.model_size, device="cpu", compute_type="int8")
-            self.backend = "faster-whisper"
-            print(" " * 56, end="\r", flush=True)
-            return True
-        except Exception as exc:
-            print(f"[voice] speech recognition unavailable: {exc}")
-            return False
 
     def _record(self):
         import numpy as np
@@ -484,8 +338,12 @@ class Listener:
         return np.concatenate(frames, axis=0).flatten()
 
     def warm_up(self) -> bool:
-        """Load the models now, so the first thing you say isn't missed."""
-        return self._ensure_model() and self._ensure_vad()
+        """Load the VAD now, so the first thing you say isn't missed.
+
+        Transcription is a hosted call with nothing to preload; this just brings
+        up the one local model.
+        """
+        return self._ensure_vad()
 
     def _ensure_vad(self) -> bool:
         if self._vad is not None:
@@ -570,10 +428,9 @@ class Listener:
         """Wait for them to speak, then transcribe. No key press involved.
 
         `abort` is polled between 32ms chunks so a keystroke can take over.
-        `on_speech_start` fires as soon as speech begins, which is the earliest
-        useful moment to start warming the language model.
+        `on_speech_start` fires as soon as speech begins.
         """
-        if not self._ensure_model() or not self._ensure_vad():
+        if not self._ensure_vad():
             return None
 
         try:
@@ -584,18 +441,14 @@ class Listener:
 
         if reason != "speech" or audio is None:
             return None
-        self.last_audio = audio
         return self._transcribe(audio, hint)
 
     def listen(self, hint: str | None = None) -> str | None:
         """Record until Enter, then transcribe. None if nothing was heard.
 
-        `hint` is a short line of vocabulary Whisper should expect -- names it
-        would otherwise spell phonetically ("Lia" as "Leah", "Anaya" as "Ania").
+        `hint` is a short line of vocabulary the recogniser should expect --
+        names it would otherwise spell phonetically ("Lia" as "Leah").
         """
-        if not self._ensure_model():
-            return None
-
         try:
             audio = self._record()
         except Exception as exc:
@@ -605,46 +458,20 @@ class Listener:
         if audio is None or len(audio) < SAMPLE_RATE_IN // 4:
             return None
 
-        self.last_audio = audio
         return self._transcribe(audio, hint)
 
     def _transcribe(self, audio, hint: str | None) -> str | None:
         print("  ...transcribing".ljust(40), end="\r", flush=True)
-        audio_f32 = audio.astype("float32") / 32768.0
-
-        if self.backend == "openvino":
-            # The hint is dropped on the NPU, and only there. A prompt makes the
-            # decoder input a different length each call and the NPU compiles to
-            # fixed shapes, so asking for one raises rather than degrading.
-            # WHISPER_HINT_ENABLED carries the reasoning and the measurements.
-            kwargs = {}
-            if hint and WHISPER_HINT_ENABLED:
-                kwargs["initial_prompt"] = hint
-            try:
-                text = str(self._model.generate(audio_f32, **kwargs)).strip()
-            except Exception as exc:
-                # Never lose the utterance over a backend problem: say what
-                # happened and let her act on nothing, the same as silence.
-                print(" " * 40, end="\r", flush=True)
-                print(f"[voice] transcription failed on {WHISPER_DEVICE}: {exc}")
-                return None
-        else:
-            segments, _ = self._model.transcribe(
-                audio_f32, beam_size=1, language="en",
-                initial_prompt=hint if WHISPER_HINT_ENABLED else None,
-            )
-            text = " ".join(s.text for s in segments).strip()
-
+        text = llm.transcribe(audio, SAMPLE_RATE_IN, prompt=hint)
         print(" " * 40, end="\r", flush=True)
 
         if not text:
             return None
 
-        # Whisper hands the initial_prompt back verbatim when the audio is
-        # mostly silence -- it has nothing to transcribe and the prompt is the
-        # likeliest continuation. Found in her real memory: "This is a
-        # conversation with Lia" and "This is a conversation with Wade" were
-        # both stored as things Wade had said, and she later quoted them back
+        # The recogniser hands the prompt back verbatim when the audio is mostly
+        # silence -- it has nothing to transcribe and the prompt is the likeliest
+        # continuation. Found in her real memory: "This is a conversation with
+        # Lia" was stored as a thing Wade had said, and she later quoted it back
         # at him as his own words. The hint is vocabulary, never speech.
         if hint and _echoes_hint(text, hint):
             return None

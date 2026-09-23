@@ -62,21 +62,22 @@ def _log(text: str, decided: str | None, source: str):
 # guesses here are cheap in one direction only -- a false positive costs one
 # round-trip and the model then says "just talking", while a false negative
 # means the request is silently never understood. So it's deliberately loose.
+#
+# The actions left in the menu after the trim are mic/voice/wake switching and
+# the notes commands, so the hint words follow them. Music, volume and library
+# vocabulary used to live here too and were removed with the actions they
+# pointed at -- a leftover "volume" hint would have meant "louder" paid a model
+# round-trip only to be told "just_talk", which is worse than never asking.
 ACTION_HINTS = {
-    # music / playback
-    "music", "song", "songs", "track", "album", "playlist", "play", "playing",
-    "played", "pause", "paused", "resume", "skip", "next", "previous", "back",
-    "stop", "spotify", "youtube", "player",
-    # volume
-    "volume", "loud", "louder", "loudly", "quiet", "quieter", "silent", "mute",
-    "muted", "unmute", "sound", "audible", "hear", "hearing",
-    # library
-    "read", "reading", "file", "files", "book", "books", "document", "documents",
-    "pdf", "epub", "library", "novel",
-    # Generic verbs that carry a request when paired with the above -- "put
-    # something on", "turn that down". Common enough in ordinary speech to cost
-    # the occasional wasted round-trip, which is the cheaper mistake here.
-    "put", "turn",
+    # listening / speaking
+    "listen", "listening", "hear", "hearing", "mic", "microphone", "voice",
+    "speak", "speaking", "talk", "talking", "quiet", "hush", "mute", "unmute",
+    "silent", "sleep", "wake",
+    # her name / attention
+    "name", "attention", "everything",
+    # her memory (the sticky notes)
+    "remember", "remembers", "note", "notes", "sticky", "memorize", "memorise",
+    "forget", "know", "memory",
 }
 
 _WORD = re.compile(r"[a-z]+")
@@ -84,119 +85,65 @@ _WORD = re.compile(r"[a-z]+")
 # One entry per thing she can actually do. Kept parameterless on purpose: a 3B
 # model picking between simple named actions is far more reliable than one
 # asked to also fill in arguments correctly.
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "play_music",
-            "description": (
-                "List the music she has, so they can pick one. Use when they ask her to play "
-                "music or put something on without naming which track."
-            ),
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "pause_music",
-            "description": "Stop the music she is playing.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "volume_up",
-            "description": (
-                "Turn the system volume up. Use whenever they want it louder, in any wording -- "
-                "'turn it up', 'I can barely hear that', 'a bit more'."
-            ),
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "volume_down",
-            "description": (
-                "Turn the system volume down. Use whenever they want it quieter, in any "
-                "wording -- 'turn it down', 'that's too loud', 'bring it down a bit'."
-            ),
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "mute_sound",
-            "description": "Mute the system sound completely.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "unmute_sound",
-            "description": "Unmute the system sound, turning it back on.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "check_volume",
-            "description": (
-                "Report what the volume is currently set to. Use when they ask what the volume "
-                "is, rather than asking to change it."
-            ),
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "read_files",
-            "description": (
-                "Read and index new documents the person has put in her library folder, so she "
-                "can answer questions about them afterwards. Use when they ask her to read "
-                "their files, or mention having added a book or document for her."
-            ),
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "just_talk",
-            "description": (
-                "Use this for anything that is not one of the actions above: ordinary "
-                "conversation, questions, feelings, opinions, or simply talking about music, "
-                "books or sound without asking for anything to be done."
-            ),
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-]
+#
+# Asked for as one word rather than as a tool call. This used to go through
+# Ollama's function-calling API, and that quietly stopped working the day
+# MODEL_CHAT became gemma2:2b -- gemma2's chat template carries no tool
+# handling at all (no .Tools, no .ToolCalls), so Ollama rejects a request with
+# a tools array outright. route()'s own `except Exception: return None` then
+# swallowed the 400, and this entire layer returned None for every input
+# without ever saying so. It measured 30/32 on llama3.2:3b and 0/n here.
+#
+# A named-choice completion needs nothing from the template, so it works on
+# whatever OPENAI_CHAT_MODEL happens to be -- which is the property this layer
+# actually wants, given it exists to be a safety net.
+ACTIONS = {
+    "mic_off": "Stop listening entirely until they start you again.",
+    "mic_on": "Start listening again after being put to sleep.",
+    "voice_off": "Go silent -- stop speaking replies out loud, keep listening.",
+    "voice_on": "Speak replies out loud again after being muted.",
+    "wake_off": "Answer everything heard, not only sentences addressed to her by name.",
+    "wake_on": "Only answer when they say her name first.",
+    "read_notes": (
+        "Read back what their sticky notes say -- the things they have written down "
+        "for her. Use when they ask what she remembers or knows about them."
+    ),
+    "reload_notes": "Re-read the notes folder in case they added or changed notes.",
+    "just_talk": (
+        "Anything that is not one of the actions above: ordinary conversation, "
+        "questions, feelings, opinions. Talking is what she is for."
+    ),
+}
 
 TOOL_COMMANDS = {
-    "play_music": "/track list",
-    "pause_music": "/track stop",
-    "volume_up": "/volume up",
-    "volume_down": "/volume down",
-    "mute_sound": "/volume mute",
-    "unmute_sound": "/volume unmute",
-    "check_volume": "/volume",
-    "read_files": "/library scan",
+    "mic_off": "/mic off",
+    "mic_on": "/mic on",
+    "voice_off": "/voice off",
+    "voice_on": "/voice on",
+    "wake_off": "/wake off",
+    "wake_on": "/wake on",
+    "read_notes": "/notes",
+    "reload_notes": "/notes reload",
     "just_talk": None,
 }
 
+# Longest first, and it has to stay that way: "voice_off" is a substring of
+# nothing now, but the scan reads an answer of "voice_off" correctly only while
+# no other name contains it -- same class of bug as the one spoken_command()
+# carries a comment about ("unmute" matching "mute"). Keep the sort even when
+# every current name is safe; a future "voice_off_all" would otherwise break it.
+_ACTION_NAMES = sorted(TOOL_COMMANDS, key=len, reverse=True)
+
+_MENU = "\n".join(f"{name} -- {what}" for name, what in ACTIONS.items())
+
 INSTRUCTION = (
-    "Decide what this person wants from you right now. If they are asking you to control "
-    "music playback, change or check the volume, or read files they've added, call the "
-    "function that matches. If they are just talking to you -- conversation, a question, a "
-    "feeling, or merely mentioning music or books without asking for anything -- call "
-    "just_talk. Call exactly one function.\n\n"
+    "Decide what this person wants from you right now, and answer with exactly one of "
+    "these names and nothing else. No punctuation, no explanation, no sentence.\n\n"
+    f"{_MENU}\n\n"
+    "If they are asking you to switch your listening or speaking, change how you "
+    "decide what's addressed to you, or read back their notes, answer with the name "
+    "that matches. If they are just talking to you -- conversation, a question, a "
+    "feeling, an opinion, anything else at all -- answer just_talk.\n\n"
     # The distinction that matters is asking-vs-telling, not present-vs-past.
     # An earlier version of this said "only if they want it to happen NOW",
     # which read "I've added a book, go have a look" as past-tense chatter and
@@ -209,13 +156,14 @@ INSTRUCTION = (
     # Abstract rules alone didn't land: stated as principles, "I couldn't hear
     # you earlier" turned the volume up 5 times out of 5, and "I added a book,
     # go have a look" was ignored 5 out of 5. Concrete pairs are what a model
-    # this size actually generalises from.
+    # this size actually generalises from. The pairs kept below are the ones
+    # that still have actions to map onto after the trim.
     "Examples:\n"
-    "'I can barely hear this' -> volume_up (asking, right now)\n"
+    "'Stop listening' -> mic_off (asking, right now)\n"
     "'I couldn't hear you properly earlier' -> just_talk (telling you about before)\n"
-    "'I've added a book for you, go have a look' -> read_files (asking you to read it)\n"
+    "'I've written some things down for you, take a look' -> read_notes (asking her to read them)\n"
     "'I read a really good book yesterday' -> just_talk (telling you about their day)\n"
-    "'Could you put something on' -> play_music (asking)\n"
+    "'You can talk now' -> voice_on (asking)\n"
     "'The music at that party was so loud' -> just_talk (describing something)"
 )
 
@@ -224,6 +172,21 @@ def might_be_action(text: str) -> bool:
     """Worth asking the model about, or obviously just conversation?"""
     words = set(_WORD.findall(text.lower()))
     return bool(words & ACTION_HINTS)
+
+
+def _chosen(answer: str) -> str | None:
+    """Which action the model named, or None if it named nothing we know.
+
+    Deliberately a scan rather than an equality check. Asked for one word, a
+    small model still sometimes wraps it -- "volume_up.", "**volume_up**",
+    "The answer is volume_up" -- and throwing all of those away would recreate
+    the silent do-nothing this whole layer exists to prevent. Anything genuinely
+    unrecognisable still returns None and is treated as conversation.
+    """
+    if not answer:
+        return None
+    lowered = answer.lower()
+    return next((name for name in _ACTION_NAMES if name in lowered), None)
 
 
 def log_matched(text: str, command: str):
@@ -239,7 +202,7 @@ def log_matched(text: str, command: str):
 def route(text: str) -> str | None:
     """The slash command they meant, or None to treat this as conversation.
 
-    Never raises: if Ollama is unreachable or slow, this is an optional extra
+    Never raises: if the model is unreachable or slow, this is an optional extra
     layer, and falling back to normal conversation is a better outcome than
     failing the turn outright.
     """
@@ -247,21 +210,34 @@ def route(text: str) -> str | None:
         return None
 
     try:
-        calls = llm.chat_tools(
+        answer = llm.chat(
             [
                 {"role": "system", "content": INSTRUCTION},
                 {"role": "user", "content": text},
             ],
-            TOOLS,
+            # Long enough for the longest name: "unmute_sound" is four tokens
+            # on its own, and a model that opens with a stray space or newline
+            # needs the headroom or the name arrives truncated.
+            num_predict=8,
+            # Same reasoning as chat_tools' old 20s: this sits between someone
+            # speaking and anything happening, so waiting two minutes on it
+            # would be worse than not asking at all.
+            timeout=20,
         )
     except Exception:
+        # Model unreachable or slow. This is an optional extra layer, and
+        # falling back to ordinary conversation beats failing the turn.
         return None
 
-    if not calls:
-        _log(text, None, "model-no-call")
+    name = _chosen(answer)
+    if name is None:
+        # It answered, but with nothing recognisable. Logged distinctly from a
+        # clean "just_talk" -- one is the model deciding, the other is the
+        # model wandering, and telling them apart is the whole point of having
+        # this log at all.
+        _log(text, None, "model-unparsed")
         return None
 
-    name = (calls[0].get("function") or {}).get("name")
     command = TOOL_COMMANDS.get(name)
     _log(text, command, f"model:{name}")
     return command

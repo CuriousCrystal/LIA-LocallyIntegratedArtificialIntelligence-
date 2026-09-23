@@ -1,48 +1,18 @@
-requests>=2.31
+requests>=2.31         # every call to the hosted API (chat, speech-to-text)
 numpy>=1.26
-
-# --- library (reads PDFs dropped in library/, and DECODE reads its reference doc) ---
-pypdf>=4.0             # PDF text extraction
-ebooklib>=0.18         # .epub text extraction
-beautifulsoup4>=4.12   # strips the HTML inside epub chapters down to plain text
-python-docx>=1.1       # .docx text extraction (Word). Imported as "docx".
+python-dotenv>=1.0     # loads LIA/.env so the key needn't be a real env var (optional)
 
 # --- voice: speaking ---
-piper-tts>=1.6        # local neural TTS, uses the voice files in voices/
-pyttsx3>=2.98         # fallback to the built-in Windows voice
-sounddevice>=0.5      # audio playback + microphone capture
+# Local Piper only. There is no cloud voice and no SAPI fallback any more.
+piper-tts>=1.6       # local neural TTS, uses the .onnx files in voices/
+sounddevice>=0.5     # audio playback + microphone capture
 
-# --- her own music (files in music/, played by number) ---
-soundfile>=0.12        # decodes .mp3/.wav/.flac/.ogg/.aiff for music.py
-av>=11.0               # the .m4a/AAC fallback libsndfile has no decoder for.
-                       # Arrives with faster-whisper anyway; listed because
-                       # music.py imports it directly, not by accident.
-
-# --- voice: listening (optional, only needed with LISTEN_ENABLED) ---
-faster-whisper>=1.1   # speech recognition on the CPU. Still the fallback, and
-                      # still what runs if the OpenVINO path below is absent.
+# --- voice: listening ---
+# Transcription is a hosted API (OPENAI_TRANSCRIBE_MODEL). The only local
+# piece left is voice activity detection -- deciding when you have stopped
+# talking, which has to happen before any audio can be sent.
 pysilero-vad>=3.0     # voice activity detection for the open mic (onnx, no torch)
-
-# Speech recognition on an Intel NPU (WHISPER_BACKEND = "openvino"). Optional:
-# without it she falls back to faster-whisper by herself. Needs a model too --
-# see LIA/models/README.md. No PyTorch: the published models are pre-converted,
-# which is the point of using them.
-openvino-genai>=2025.0
-huggingface_hub>=0.25   # only to fetch that model; not imported at runtime
 
 # --- running as a background app ---
 pystray>=0.19         # system tray icon
-Pillow>=10.0          # draws the tray icon
-
-# --- system volume (optional) ---
-pycaw>=20240210        # direct system volume control (Core Audio API)
-
-# --- speaker recognition (optional) ---
-# Needs a model file too -- see LIA/models/README.md
-sherpa-onnx>=1.13       # local speaker-embedding extraction (onnx, no torch, ~27MB)
-
-# --- internet (off: INTERNET_ENABLED = False, she is fully offline) ---
-# no extra package -- internet.py uses requests, already listed above
-
-# --- docs (only needed to rebuild the PDFs in docs/) ---
-# reportlab>=4.0       # pip install it separately; she never imports it
+Pillow>=10.0          # draws the tray icon and the mascot's fallback face

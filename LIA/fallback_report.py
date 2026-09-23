@@ -1,9 +1,9 @@
-"""How often is the cloud model actually falling back to local?
+"""How often can she actually not reach the model?
 
-The free/paid/local choice in config.py was made from one afternoon's
-measurement (config.py's OPENROUTER_MODEL comment). CLOUD_FALLBACK_LOG exists
-so that choice can be revisited from a week of real use instead of a guess --
-this script reads what it's recorded.
+There is no local model to fall back to any more, so what CLOUD_FALLBACK_LOG
+records are the failures themselves: rate limits, dropped streams, empty
+replies. This script reads what it has recorded, so the choice of provider
+and model can be revisited from a week of real use instead of a guess.
 
     python fallback_report.py            # last 7 days
     python fallback_report.py --days 30  # a longer window

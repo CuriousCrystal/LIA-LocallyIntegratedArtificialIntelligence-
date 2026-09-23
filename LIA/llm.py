@@ -1,135 +1,90 @@
+"""Lia's one path to a hosted model.
+
+Chat and speech-to-text go through an OpenAI-compatible HTTP API -- Groq
+(api.groq.com) by default, anything else via OPENAI_BASE_URL. There is no local
+model any more: Ollama, and every is-it-up / launch-it / warm-it / unload-it
+function that used to manage one, are gone. A hosted model has no warm-up to
+pay and no memory to free.
+
+Every request here sends `store: false` where the API supports it. That does not
+make the conversation stay on the machine -- sending it is what the request is --
+but it keeps the provider from retaining the completion for its own dashboards.
+The rest of the privacy posture is an org setting on the provider side.
+"""
+
+import io
 import json
-import os
-import shutil
-import subprocess
-import threading
-import time
+import wave
 from datetime import datetime
-from pathlib import Path
-from urllib.parse import urlparse
 
 import requests
 
-
-class Unavailable(RuntimeError):
-    """Ollama isn't reachable. Recoverable -- she waits rather than dying."""
-
-
-def is_up(timeout: float = 3.0) -> bool:
-    try:
-        requests.get(f"{OLLAMA_URL}/api/tags", timeout=timeout)
-        return True
-    except requests.RequestException:
-        return False
-
-
-def find_binary() -> str | None:
-    """Full path to ollama.exe, or None if it isn't on this machine at all.
-
-    PATH alone is not a good enough test, and getting that wrong is worse than
-    not checking. The installer adds Ollama to PATH, but a process that started
-    before it did -- or any process launched from Explorer, which hands on a
-    copy of the environment as it was at sign-in -- carries the old PATH until
-    the next login. Ollama can be installed, running, and answering requests
-    while shutil.which() still says no. Seen exactly that, an hour after a
-    winget install.
-    """
-    found = shutil.which("ollama")
-    if found:
-        return found
-
-    candidates = [
-        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe",
-        Path(os.environ.get("ProgramFiles", "")) / "Ollama" / "ollama.exe",
-        Path(os.environ.get("ProgramW6432", "")) / "Ollama" / "ollama.exe",
-        Path.home() / ".ollama" / "ollama.exe",
-        Path("/usr/local/bin/ollama"),
-        Path("/usr/bin/ollama"),
-    ]
-    for path in candidates:
-        try:
-            if path.is_file():
-                return str(path)
-        except OSError:
-            continue
-    return None
-
-
-def is_installed() -> bool:
-    """Is there an Ollama on this machine for us to wait for?"""
-    return find_binary() is not None
-
-
-def _serving_locally() -> bool:
-    """Is OLLAMA_URL this machine? If not, a missing local binary means nothing."""
-    try:
-        host = (urlparse(OLLAMA_URL).hostname or "").lower()
-    except ValueError:
-        return True
-    return host in {"127.0.0.1", "localhost", "::1", "0.0.0.0", ""}
-
-
-def wait_until_ready(total_seconds: float = 180, try_launch: bool = True) -> bool:
-    """Block until Ollama answers, optionally starting it.
-
-    On autostart she'll almost always beat Ollama to the login -- without this
-    she'd crash on her very first sentence every single boot. That is what the
-    long wait is for, and it is worth having.
-
-    What it is *not* for is a machine with no Ollama on it. There the wait can
-    only ever end in the same failure three minutes later, with her unable to
-    say so until it does. So: waiting is for something that is coming, and if
-    nothing is coming we say so now.
-
-    Only ever gives up early when the binary is absent *and* OLLAMA_URL points
-    at this machine -- pointed at another host, whether there's a copy here is
-    beside the point and the wait stands.
-    """
-    if is_up():
-        return True
-
-    binary = find_binary()
-
-    if try_launch and binary:
-        try:
-            subprocess.Popen(
-                [binary, "serve"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-                # Start it somewhere neutral. Launched from inside a packaged
-                # app, Ollama's llama-server workers pick up DLLs out of the
-                # bundle's _internal folder and hold handles on them, which
-                # locks the app's own files for as long as a model is loaded.
-                cwd=str(Path.home()),
-            )
-        except Exception:
-            pass  # couldn't launch it -- it may still be coming up on its own
-
-    if binary is None and _serving_locally():
-        return False
-
-    deadline = time.monotonic() + total_seconds
-    while time.monotonic() < deadline:
-        if is_up():
-            return True
-        time.sleep(2)
-    return False
-
 from config import (
-    OLLAMA_URL, MODEL_CHAT, MODEL_EMBED, OLLAMA_KEEP_ALIVE, NUM_CTX,
-    CLOUD_CHAT_ENABLED, CLOUD_MAX_TOKENS, CLOUD_LOG_USAGE, CLOUD_FALLBACK_LOG,
-    OPENROUTER_API_KEY, OPENROUTER_MODEL, DATA_DIR,
-    AGENT_MAX_TOKENS, ASK_AGENT_SYSTEM_PROMPT, AGENT_TIMEOUT_SECONDS,
+    OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_CHAT_MODEL,
+    OPENAI_TRANSCRIBE_MODEL, OPENAI_TIMEOUT,
+    CLOUD_LOG_USAGE, CLOUD_FALLBACK_LOG, DATA_DIR,
 )
 
-OPTIONS = {"num_ctx": NUM_CTX}
 
-# Every cloud fallback, appended as one JSON object per line -- same shape and
-# same reasoning as intent.py's intent_log.jsonl. `lia.log` already shows each
-# one as it happens, but as prose with no timestamp; this is what a "how often
-# does this actually happen" question needs to be answered from data instead
-# of a guess.
+class CloudError(RuntimeError):
+    """A request to the hosted model failed and there is nowhere to fall back to.
+
+    There is no local model behind this any more, so the caller's job is to say
+    so plainly, not to retry against something else.
+    """
+
+
+class RateLimited(CloudError):
+    """The model refused this turn for rate-limit reasons (HTTP 429) -- too many
+    requests too fast. Waiting a moment and trying again is the right response."""
+
+
+class QuotaExhausted(CloudError):
+    """Also an HTTP 429, but `insufficient_quota` -- the API account is out of
+    credit. Waiting does nothing; it needs money added at platform.openai.com.
+    Its own class so the caller says that, not "rate limited, try again"."""
+
+
+def _classify_429(resp) -> CloudError:
+    """A 429 is either a real rate limit (wait, retry) or an exhausted account
+    (waiting won't help). Tell them apart from the error body so the spoken
+    reason is honest. Groq's free tier has no balance to exhaust, so its 429s
+    always fall through to RateLimited -- correct, though the wait may be until
+    the daily free limit resets rather than a few seconds."""
+    try:
+        kind = (resp.json().get("error") or {}).get("type", "")
+    except Exception:
+        kind = ""
+    if kind == "insufficient_quota":
+        return QuotaExhausted("the API account is out of credit")
+    return RateLimited("the model is rate limited right now")
+
+
+def _openai_url(path: str) -> str:
+    return f"{OPENAI_BASE_URL}/{path.lstrip('/')}"
+
+
+def _auth_headers() -> dict:
+    return {"Authorization": f"Bearer {OPENAI_API_KEY}"}
+
+
+def _sends_store() -> bool:
+    """`store: false` is an OpenAI parameter -- it asks them not to keep the
+    completion for their own dashboards. Other OpenAI-compatible servers (Groq,
+    the default) can 400 on an unrecognised field, so only send it to OpenAI."""
+    return "openai.com" in OPENAI_BASE_URL
+
+
+def have_key() -> bool:
+    """Is there an API key to talk to the model with at all?"""
+    return bool(OPENAI_API_KEY)
+
+
+# Every cloud error, appended as one JSON object per line to the same file
+# fallback_report.py already reads. It used to record fallbacks to the local
+# model; there is no local model now, so it records the failures themselves --
+# "how often can she not reach the model" is the question a week of this
+# answers and a single session can't.
 _FALLBACK_LOG_PATH = DATA_DIR / "cloud_fallback_log.jsonl"
 
 
@@ -143,361 +98,165 @@ def _log_fallback(reason: str, mid_stream: bool):
                 "at": datetime.now().isoformat(timespec="seconds"),
                 "reason": reason,
                 "mid_stream": mid_stream,
-                "model": OPENROUTER_MODEL,
+                "model": OPENAI_CHAT_MODEL,
             }, ensure_ascii=False) + "\n")
     except Exception:
         pass  # logging must never be the reason a turn fails
 
 
+# ------------------------------------------------------------------- chat ---
+
 def chat(messages: list[dict], json_mode: bool = False,
          model: str | None = None, num_predict: int | None = None,
-         timeout: float = 120) -> str:
+         timeout: float = OPENAI_TIMEOUT) -> str:
     """messages: list of {"role": "system"|"user"|"assistant", "content": str}
 
-    json_mode constrains the model to emit valid JSON -- used for fact extraction,
-    where a 3B model otherwise likes to wrap the object in explanatory prose.
+    json_mode constrains the reply to a single valid JSON object. (Unused by
+    any caller right now -- fact extraction is gone with the database -- but
+    kept because it is one flag the API already supports.)
 
-    `model` runs the request against something other than MODEL_CHAT. That exists
-    for the small classifiers (see judge.py): a yes/no question doesn't need the
-    conversational model, and asking a 0.5B costs a fraction of the time.
-
-    `num_predict` caps the reply length. A classifier that has answered "yes" has
-    nothing further to say, and letting it run on is pure latency.
+    `model` runs the request against something other than OPENAI_CHAT_MODEL;
+    `num_predict` caps the reply length (a classifier that has answered "yes"
+    has nothing more to say). Both keep the same names the Ollama version had
+    so intent.py did not need touching.
     """
-    options = dict(OPTIONS)
-    if num_predict is not None:
-        options["num_predict"] = num_predict
-
     payload = {
-        "model": model or MODEL_CHAT,
+        "model": model or OPENAI_CHAT_MODEL,
         "messages": messages,
         "stream": False,
-        "keep_alive": OLLAMA_KEEP_ALIVE,
-        "options": options,
     }
+    if _sends_store():
+        payload["store"] = False
+    if num_predict is not None:
+        payload["max_tokens"] = num_predict
     if json_mode:
-        payload["format"] = "json"
+        payload["response_format"] = {"type": "json_object"}
 
-    resp = requests.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=timeout)
-    resp.raise_for_status()
-    return resp.json()["message"]["content"]
-
-
-def chat_tools(messages: list[dict], tools: list[dict], timeout: float = 30) -> list[dict]:
-    """Let the model pick from a set of actions. Returns its tool_calls, which
-    is empty when it didn't choose one.
-
-    Shorter timeout than chat(): this sits between you speaking and anything
-    happening, so waiting two minutes on it would be worse than not asking.
-    """
-    resp = requests.post(
-        f"{OLLAMA_URL}/api/chat",
-        json={
-            "model": MODEL_CHAT,
-            "messages": messages,
-            "tools": tools,
-            "stream": False,
-            "keep_alive": OLLAMA_KEEP_ALIVE,
-            "options": OPTIONS,
-        },
-        timeout=timeout,
-    )
-    resp.raise_for_status()
-    return resp.json().get("message", {}).get("tool_calls") or []
-
-
-class RateLimited(RuntimeError):
-    """The hosted model refused this turn because of its free-tier limits."""
-
-
-def using_cloud() -> bool:
-    """Is the conversation going to a hosted model this turn?"""
-    return bool(CLOUD_CHAT_ENABLED and OPENROUTER_API_KEY)
-
-
-def _cloud_stream(messages: list[dict]):
-    """Yield the reply from OpenRouter, a piece at a time.
-
-    Streamed rather than fetched whole for the same reason the local path is:
-    she starts speaking her first sentence while the rest is still arriving. A
-    non-streaming cloud call would feel slower than the local model despite
-    being faster, because nothing can be said until all of it lands.
-    """
-    resp = requests.post(
-        "https://openrouter.ai/api/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-            "HTTP-Referer": "https://github.com/lia-companion",
-            "X-Title": "Lia",
-        },
-        json={
-            "model": OPENROUTER_MODEL,
-            "messages": messages,
-            "stream": True,
-            "max_tokens": CLOUD_MAX_TOKENS,
-            # Asks for the token counts in the final chunk, so the spend is
-            # visible per turn instead of only on the dashboard.
-            "stream_options": {"include_usage": True},
-        },
-        timeout=60,
-        stream=True,
-    )
-    # Free models are rate limited rather than billed, so 429 is an ordinary
-    # weather condition here, not an exception. Named so the log says which of
-    # the two it was, since "slow" and "refused" want different responses.
-    if resp.status_code == 429:
-        raise RateLimited(f"{OPENROUTER_MODEL} is rate limited right now")
-    resp.raise_for_status()
-
-    said_anything = False
-    for raw in resp.iter_lines():
-        if not raw:
-            continue
-        line = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
-        if not line.startswith("data: "):
-            continue
-        body = line[6:].strip()
-        if body == "[DONE]":
-            break
-        try:
-            chunk = json.loads(body)
-        except ValueError:
-            continue
-
-        usage = chunk.get("usage")
-        if usage and CLOUD_LOG_USAGE:
-            print(f"\n[cloud: {usage.get('prompt_tokens')} in / "
-                  f"{usage.get('completion_tokens')} out]", flush=True)
-
-        for choice in chunk.get("choices", []):
-            piece = (choice.get("delta") or {}).get("content") or ""
-            if piece:
-                said_anything = True
-                yield piece
-
-    if not said_anything:
-        # An empty 200 is not a reply. Raise so the caller falls back to the
-        # local model rather than leaving her silent.
-        raise RuntimeError("cloud returned no content")
-
-
-def ask_agent(model: str, query: str) -> str:
-    """One question to a specific OpenRouter model, by name, collected whole.
-
-    Used for "ask cat/fox" (see AGENTS in config.py) -- she has to
-    have the entire answer before she can relay it, so nothing is lost by not
-    yielding pieces the way chat_stream does for her own replies.
-
-    Still requested with stream=True and assembled here rather than as a
-    single non-streaming call: that's the exact request shape already proven
-    against OpenRouter (see _cloud_stream), including against these specific
-    free models when they were measured for config.py's AGENTS comment. A
-    non-streaming request was never tested against them.
-
-    Raises RateLimited on a 429, TimeoutError past AGENT_TIMEOUT_SECONDS, and
-    RuntimeError on an empty reply -- same vocabulary chat_stream already
-    uses, since a free model is a free model whichever one was asked.
-    """
-    deadline = time.monotonic() + AGENT_TIMEOUT_SECONDS
-    resp = requests.post(
-        "https://openrouter.ai/api/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-            "HTTP-Referer": "https://github.com/lia-companion",
-            "X-Title": "Lia",
-        },
-        json={
-            "model": model,
-            "messages": [
-                {"role": "system", "content": ASK_AGENT_SYSTEM_PROMPT},
-                {"role": "user", "content": query},
-            ],
-            "stream": True,
-            "max_tokens": AGENT_MAX_TOKENS,
-        },
-        timeout=AGENT_TIMEOUT_SECONDS,
-        stream=True,
-    )
-    if resp.status_code == 429:
-        raise RateLimited(f"{model} is rate limited right now")
-    resp.raise_for_status()
-
-    # requests' own timeout only bounds the *gap* between chunks on a
-    # streamed response, not the total call -- a provider trickling data
-    # slowly can run well past it without ever tripping it (measured: 121s,
-    # still empty, against nemotron-nano-12b-v2 which normally answers in
-    # ~1.5s). Enforced again here, against wall-clock time across the whole
-    # read, so a slow provider is a fast failure instead of a long one.
-    pieces = []
-    for raw in resp.iter_lines():
-        if time.monotonic() > deadline:
-            resp.close()
-            raise TimeoutError(f"{model} took longer than {AGENT_TIMEOUT_SECONDS}s")
-        if not raw:
-            continue
-        line = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
-        if not line.startswith("data: "):
-            continue
-        body = line[6:].strip()
-        if body == "[DONE]":
-            break
-        try:
-            chunk = json.loads(body)
-        except ValueError:
-            continue
-        for choice in chunk.get("choices", []):
-            piece = (choice.get("delta") or {}).get("content") or ""
-            if piece:
-                pieces.append(piece)
-
-    text = "".join(pieces).strip()
-    if not text:
-        raise RuntimeError(f"{model} returned an empty reply")
-    return text
+    try:
+        resp = requests.post(_openai_url("chat/completions"),
+                             headers=_auth_headers(), json=payload, timeout=timeout)
+        if resp.status_code == 429:
+            raise _classify_429(resp)
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"] or ""
+    except CloudError:
+        raise
+    except requests.RequestException as exc:
+        raise CloudError(f"chat request failed: {exc}") from exc
 
 
 def chat_stream(messages: list[dict]):
-    """Same as chat(), but yields token chunks as they arrive.
+    """Same as chat(), but yields the reply a piece at a time.
 
-    A 3B model on 4GB VRAM takes tens of seconds per reply -- without streaming
-    the terminal looks frozen the whole time.
+    Streamed so she starts speaking her first sentence while the rest is still
+    arriving -- a spoken paragraph fetched whole feels slower than one that
+    begins right away, even when it isn't.
 
-    Goes to the cloud when one is configured, and falls back to Ollama on any
-    failure. The fallback is the point: the network is the one part of this she
-    does not own, so losing it should cost cleverness, not speech.
+    Raises CloudError (or RateLimited) on any failure. There is no local model
+    to fall back to; the caller says so and moves on.
     """
-    if using_cloud():
-        try:
-            spoke = False
-            for piece in _cloud_stream(messages):
-                spoke = True
-                yield piece
-            return
-        except Exception as exc:
-            if spoke:
-                # Already part-way through saying something. Restarting on the
-                # local model would splice two half-replies into one sentence,
-                # so let it stand -- but say so, because a reply that simply
-                # stops mid-thought is otherwise a mystery. Seen for real: a
-                # free provider dropped the connection mid-stream.
-                _log_fallback(type(exc).__name__, mid_stream=True)
-                print("\n[cloud stream dropped -- that reply may be cut short]",
-                      flush=True)
-                return
-            why = ("rate limited" if isinstance(exc, RateLimited)
-                   else type(exc).__name__)
-            _log_fallback(why, mid_stream=False)
-            print(f"\n[cloud unavailable ({why}) -- answering locally]", flush=True)
+    payload = {
+        "model": OPENAI_CHAT_MODEL,
+        "messages": messages,
+        "stream": True,
+        "max_tokens": CLOUD_MAX_TOKENS,
+        # Ask for the token counts in the final chunk, so the spend is visible
+        # per turn instead of only on the dashboard.
+        "stream_options": {"include_usage": True},
+    }
+    if _sends_store():
+        payload["store"] = False
 
-    resp = requests.post(
-        f"{OLLAMA_URL}/api/chat",
-        json={
-            "model": MODEL_CHAT,
-            "messages": messages,
-            "stream": True,
-            "keep_alive": OLLAMA_KEEP_ALIVE,
-            "options": OPTIONS,
-        },
-        timeout=120,
-        stream=True,
-    )
-    resp.raise_for_status()
-
-    for line in resp.iter_lines():
-        if not line:
-            continue
-        chunk = json.loads(line)
-        piece = chunk.get("message", {}).get("content", "")
-        if piece:
-            yield piece
-        if chunk.get("done"):
-            break
-
-
-def unload():
-    """Drop both models out of memory now.
-
-    Called when a conversation ends rather than leaving OLLAMA_KEEP_ALIVE to
-    expire on its own: she knows when you've stopped talking, so there's no
-    reason to hold ~3.7GB of VRAM waiting for a timer.
-    """
     try:
-        requests.post(
-            f"{OLLAMA_URL}/api/chat",
-            json={"model": MODEL_CHAT, "messages": [], "keep_alive": 0},
-            timeout=30,
-        )
-        requests.post(
-            f"{OLLAMA_URL}/api/embed",
-            json={"model": MODEL_EMBED, "input": "", "keep_alive": 0},
-            timeout=30,
-        )
-    except requests.RequestException:
-        pass  # nothing to free if Ollama isn't there
+        resp = requests.post(_openai_url("chat/completions"), headers=_auth_headers(),
+                             json=payload, timeout=OPENAI_TIMEOUT, stream=True)
+        if resp.status_code == 429:
+            raise _classify_429(resp)
+        resp.raise_for_status()
+    except CloudError as exc:
+        _log_fallback(type(exc).__name__, mid_stream=False)
+        raise
+    except requests.RequestException as exc:
+        _log_fallback(type(exc).__name__, mid_stream=False)
+        raise CloudError(f"chat stream failed to start: {exc}") from exc
+
+    said_anything = False
+    try:
+        for raw in resp.iter_lines():
+            if not raw:
+                continue
+            line = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
+            if not line.startswith("data: "):
+                continue
+            body = line[6:].strip()
+            if body == "[DONE]":
+                break
+            try:
+                chunk = json.loads(body)
+            except ValueError:
+                continue
+
+            usage = chunk.get("usage")
+            if usage and CLOUD_LOG_USAGE:
+                print(f"\n[cloud: {usage.get('prompt_tokens')} in / "
+                      f"{usage.get('completion_tokens')} out]", flush=True)
+
+            for choice in chunk.get("choices", []):
+                piece = (choice.get("delta") or {}).get("content") or ""
+                if piece:
+                    said_anything = True
+                    yield piece
+    except requests.RequestException as exc:
+        # The connection dropped mid-reply. Whatever was already said stands --
+        # restarting would splice two half-answers together -- so let the caller
+        # know it may be cut short rather than pretending it finished.
+        _log_fallback(type(exc).__name__, mid_stream=True)
+        raise CloudError(f"cloud stream dropped: {exc}") from exc
+
+    if not said_anything:
+        _log_fallback("empty reply", mid_stream=False)
+        raise CloudError("cloud returned no content")
 
 
-def warm_up(messages: list[dict] | None = None):
-    """Start loading the chat model without waiting for it.
+# ------------------------------------------------------------ speech (STT) ---
 
-    Fired the moment speech is detected, so the reload overlaps with
-    transcription instead of running after it.
+def _wav_bytes(audio_i16, sample_rate: int) -> bytes:
+    """Wrap raw int16 mono samples in a WAV container, in memory."""
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        wav.writeframes(audio_i16.astype("<i2").tobytes())
+    return buf.getvalue()
 
-    Pass her real system message and this does a second, larger job: it primes
-    Ollama's prompt cache. Sending [] loads the weights but leaves the prompt
-    unread, and the prompt is where the wait actually is -- measured on a Core
-    Ultra 7 255U with gemma2:2b, her 575-token system prompt is read at about
-    110 tok/s cold, which is 5.3 seconds before she says a word. Once those
-    tokens are cached the same prompt costs 0.13s, and every later turn in the
-    session reuses the prefix:
 
-        turn 1   7.68s to first word      <- this, paid once
-        turn 2   0.99s
-        turn 3   0.92s
+def transcribe(audio_i16, sample_rate: int = 16000, prompt: str | None = None) -> str | None:
+    """One recorded utterance -> text, via OPENAI_TRANSCRIBE_MODEL.
 
-    So the fix is not a shorter prompt, it is paying for it before she is
-    listening rather than while someone waits. num_predict=1 because the point
-    is to have the prompt read, not to have an answer.
+    `prompt` is the short vocabulary hint (names that would otherwise be spelled
+    phonetically). Returns None on any failure -- a companion that hears nothing
+    this once is better than one that raises mid-conversation.
     """
-    def go():
-        try:
-            requests.post(
-                f"{OLLAMA_URL}/api/chat",
-                json={
-                    "model": MODEL_CHAT,
-                    "messages": messages or [],
-                    "keep_alive": OLLAMA_KEEP_ALIVE,
-                    "options": {**OPTIONS, "num_predict": 1},
-                    "stream": False,
-                },
-                timeout=120,
-            )
-        except requests.RequestException:
-            pass
+    if not OPENAI_API_KEY:
+        print("[voice] no API key set -- can't transcribe")
+        return None
 
-    threading.Thread(target=go, daemon=True).start()
+    data = {"model": OPENAI_TRANSCRIBE_MODEL, "language": "en", "response_format": "text"}
+    if prompt:
+        data["prompt"] = prompt
 
-
-def embed(text: str) -> list[float]:
-    """Embed one string.
-
-    Ollama 0.32 dropped /api/embeddings in favour of /api/embed, which takes
-    "input" instead of "prompt" and returns a list of vectors. Try the current
-    endpoint first and fall back, so Lia works on either side of that change.
-    """
-    resp = requests.post(
-        f"{OLLAMA_URL}/api/embed",
-        json={"model": MODEL_EMBED, "input": text, "keep_alive": OLLAMA_KEEP_ALIVE},
-        timeout=60,
-    )
-
-    if resp.status_code == 404:
-        legacy = requests.post(
-            f"{OLLAMA_URL}/api/embeddings",
-            json={"model": MODEL_EMBED, "prompt": text, "keep_alive": OLLAMA_KEEP_ALIVE},
-            timeout=60,
+    try:
+        resp = requests.post(
+            _openai_url("audio/transcriptions"),
+            headers=_auth_headers(),
+            data=data,
+            files={"file": ("speech.wav", _wav_bytes(audio_i16, sample_rate), "audio/wav")},
+            timeout=OPENAI_TIMEOUT,
         )
-        legacy.raise_for_status()
-        return legacy.json()["embedding"]
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        print(f"[voice] transcription failed: {exc}")
+        return None
 
-    resp.raise_for_status()
-    return resp.json()["embeddings"][0]
+    return (resp.text or "").strip() or None
