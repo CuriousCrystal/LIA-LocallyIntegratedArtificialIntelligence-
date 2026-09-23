@@ -12,6 +12,7 @@ but it keeps the provider from retaining the completion for its own dashboards.
 The rest of the privacy posture is an org setting on the provider side.
 """
 
+import base64
 import io
 import json
 import wave
@@ -23,6 +24,8 @@ from config import (
     OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_CHAT_MODEL,
     OPENAI_TRANSCRIBE_MODEL, OPENAI_TIMEOUT,
     CLOUD_LOG_USAGE, CLOUD_FALLBACK_LOG, DATA_DIR,
+    GEMINI_API_KEY, GEMINI_REASONING_EFFORT, USING_GEMINI_STT,
+    CLOUD_MAX_TOKENS,
 )
 
 
@@ -86,6 +89,10 @@ def have_key() -> bool:
 # "how often can she not reach the model" is the question a week of this
 # answers and a single session can't.
 _FALLBACK_LOG_PATH = DATA_DIR / "cloud_fallback_log.jsonl"
+
+# Gemini's own API (not the OpenAI-compat one), used only for transcription --
+# the compat layer has no route for it.
+_GEMINI_NATIVE_URL = "https://generativelanguage.googleapis.com/v1beta"
 
 
 def _log_fallback(reason: str, mid_stream: bool):
@@ -166,6 +173,11 @@ def chat_stream(messages: list[dict]):
     }
     if _sends_store():
         payload["store"] = False
+    # Gemini reasons before it speaks, and every second of that is silence
+    # before her first word. "low" keeps the thinking short; other providers
+    # never see the field.
+    if GEMINI_REASONING_EFFORT:
+        payload["reasoning_effort"] = GEMINI_REASONING_EFFORT
 
     try:
         resp = requests.post(_openai_url("chat/completions"), headers=_auth_headers(),
@@ -231,16 +243,70 @@ def _wav_bytes(audio_i16, sample_rate: int) -> bytes:
     return buf.getvalue()
 
 
-def transcribe(audio_i16, sample_rate: int = 16000, prompt: str | None = None) -> str | None:
-    """One recorded utterance -> text, via OPENAI_TRANSCRIBE_MODEL.
+def _gemini_transcribe(audio_i16, sample_rate: int, prompt: str | None) -> str | None:
+    """Her ears on Gemini: the native generateContent API with the utterance
+    inlined as a WAV.
 
-    `prompt` is the short vocabulary hint (names that would otherwise be spelled
-    phonetically). Returns None on any failure -- a companion that hears nothing
-    this once is better than one that raises mid-conversation.
+    The OpenAI-compatibility layer has no /audio/transcriptions route, so the
+    compat path can't carry her hearing -- this is the one place that calls
+    Gemini's own API shape instead. The vocabulary `prompt` rides along as a
+    text instruction, which is what Whisper's prompt parameter meant anyway.
+    Returns None on any failure, same contract as the Whisper path.
+    """
+    instruction = (
+        "Transcribe the audio. Return only the words spoken, with no commentary."
+    )
+    if prompt:
+        instruction = prompt + "\n\n" + instruction
+
+    data = {
+        "contents": [{
+            "parts": [
+                {"text": instruction},
+                {"inline_data": {
+                    "mime_type": "audio/wav",
+                    "data": base64.b64encode(_wav_bytes(audio_i16, sample_rate)).decode("ascii"),
+                }},
+            ]
+        }],
+        "generationConfig": {
+            # A transcription, not a chat: no reason for the model to think,
+            # and no reason to keep going past the words it heard.
+            "temperature": 0.0,
+            "maxOutputTokens": 512,
+        },
+    }
+    try:
+        resp = requests.post(
+            f"{_GEMINI_NATIVE_URL}/models/{OPENAI_TRANSCRIBE_MODEL}:generateContent",
+            headers={"x-goog-api-key": OPENAI_API_KEY},
+            json=data,
+            timeout=OPENAI_TIMEOUT,
+        )
+        resp.raise_for_status()
+        parts = (resp.json().get("candidates") or [{}])[0].get("content", {}).get("parts", [])
+        text = "".join(p.get("text", "") for p in parts).strip()
+    except (requests.RequestException, ValueError, KeyError, IndexError) as exc:
+        print(f"[voice] transcription failed: {exc}")
+        return None
+    return text or None
+
+
+def transcribe(audio_i16, sample_rate: int = 16000, prompt: str | None = None) -> str | None:
+    """One recorded utterance -> text.
+
+    Gemini goes through its native generateContent API (see _gemini_transcribe);
+    everywhere else speaks the OpenAI Whisper shape. `prompt` is the short
+    vocabulary hint (names that would otherwise be spelled phonetically).
+    Returns None on any failure -- a companion that hears nothing this once is
+    better than one that raises mid-conversation.
     """
     if not OPENAI_API_KEY:
         print("[voice] no API key set -- can't transcribe")
         return None
+
+    if USING_GEMINI_STT:
+        return _gemini_transcribe(audio_i16, sample_rate, prompt)
 
     data = {"model": OPENAI_TRANSCRIBE_MODEL, "language": "en", "response_format": "text"}
     if prompt:

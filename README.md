@@ -27,7 +27,8 @@ reference.
    ```
 2. Give her a key. Either as a real environment variable:
    ```powershell
-   setx GROQ_API_KEY "gsk_..."
+   setx GEMINI_API_KEY "AIza..."   # free from https://aistudio.google.com/apikey
+   setx GROQ_API_KEY "gsk_..."    # or Groq / any OpenAI-compatible provider
    ```
    or in a gitignored [`LIA/.env`](LIA/.env.example) file (`python-dotenv`
    loads it; a real environment variable always wins).

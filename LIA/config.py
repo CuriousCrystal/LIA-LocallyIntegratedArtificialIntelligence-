@@ -48,29 +48,56 @@ except ImportError:
 # and voice activity detection (pysilero-vad -- it decides you have stopped
 # talking, before any audio is sent anywhere).
 #
-# The key comes from the environment or LIA/.env (see the dotenv load above):
-# GROQ_API_KEY for the default, or OPENAI_API_KEY if you have repointed the base
-# URL. Whichever is set wins; Groq is checked first. Never hardcode a key here:
-# config.py is committed, and a key pushed to GitHub is picked up by secret
-# scanning and auto-revoked within minutes.
-OPENAI_API_KEY = os.environ.get("GROQ_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
-OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
+# The key comes from the environment or LIA/.env (see the dotenv load above).
+# Provider precedence, first key found wins:
+#
+#   GEMINI_API_KEY   -- Google AI Studio's free tier. She speaks its
+#                       OpenAI-compatible endpoint for chat (see base URL below)
+#                       and its native generateContent API for her ears -- the
+#                       compat layer has no /audio/transcriptions route.
+#   GROQ_API_KEY     -- the previous default; chat + Whisper transcription in
+#                       one place, no repointing needed.
+#   OPENAI_API_KEY   -- or any other OpenAI-compatible endpoint via
+#                       OPENAI_BASE_URL.
+#
+# Gemini's key doubles as OPENAI_API_KEY for llm.py's header code, so chat
+# works through the one code path; only transcribe() branches on the provider.
+# Never hardcode a key here: config.py is committed, and a key pushed to
+# GitHub is picked up by secret scanning and auto-revoked within minutes.
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+OPENAI_API_KEY = GEMINI_API_KEY or os.environ.get("GROQ_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "").rstrip("/") or (
+    "https://generativelanguage.googleapis.com/v1beta/openai" if GEMINI_API_KEY
+    else "https://api.groq.com/openai/v1"
+)
+
+# True when her ears go through Gemini's native generateContent API (inline
+# WAV; the OpenAI-compat layer has no transcription route). Derived from the
+# key; flip to False only to force Whisper-style transcription elsewhere.
+USING_GEMINI_STT = bool(GEMINI_API_KEY) and "generativelanguage" in OPENAI_BASE_URL
 
 # One model knob per capability, so any of them moves without touching the
-# others. The defaults are Groq's free models.
+# others. Defaults match the winning provider.
 #
-# Chat: llama-3.3-70b-versatile is the capable one on the free tier and still
-# fast enough to speak. llama-3.1-8b-instant is the lighter, quicker option.
-OPENAI_CHAT_MODEL = "llama-3.3-70b-versatile"
+# Gemini: gemini-2.0-flash is the free-tier workhorse -- sub-second first
+# token. gemini-2.5-flash is the more capable upgrade if quota allows.
+# Groq: llama-3.3-70b-versatile / whisper-large-v3, as before.
+if GEMINI_API_KEY:
+    OPENAI_CHAT_MODEL = "gemini-2.0-flash"
+    OPENAI_TRANSCRIBE_MODEL = "gemini-2.0-flash"
+else:
+    OPENAI_CHAT_MODEL = "llama-3.3-70b-versatile"
+    OPENAI_TRANSCRIBE_MODEL = "whisper-large-v3"
 
-# Speech-to-text: whisper-large-v3 is the accurate one and still returns in well
-# under a second on Groq. whisper-large-v3-turbo is faster again if she feels
-# slow to answer.
-OPENAI_TRANSCRIBE_MODEL = "whisper-large-v3"
+# Ask Gemini to think less: every second it reasons is silence before her
+# first word. Only added to the payload when set (see chat_stream); other
+# providers never see it.
+GEMINI_REASONING_EFFORT = "low" if GEMINI_API_KEY else None
 
 # Wall-clock ceiling on one request. Chat is streamed, so this bounds the gap
 # between chunks; transcription is a single POST.
 OPENAI_TIMEOUT = 60
+
 
 # Print the token count of each cloud turn to the log, so the spend is visible
 # while it is happening rather than at the end of the month.
@@ -115,7 +142,7 @@ TRAINING_PANEL_ENABLED = False
 # doing -- idle / listening / thinking / speaking -- in place of a spoken
 # greeting at startup. Runs alongside the tray icon (which stays the reliable
 # control surface); the mascot is the visible presence. See mascot/README.md.
-MASCOT_ENABLED = True
+MASCOT_ENABLED = False
 
 # Folder holding the sprite frames. One PNG (or numbered PNGs, or a GIF) per
 # state: idle, listening, thinking, speaking. Missing frames fall back to a
@@ -158,7 +185,7 @@ LISTEN_ENABLED = True
 #
 # Point NOTES_DIR at the folder your notes app saves into. If it doesn't exist
 # she runs anyway and just knows nothing about you, saying so once in the log.
-NOTES_DIR = Path(r"")  # e.g. r"C:\Users\you\AppData\Roaming\YourNotesApp"
+NOTES_DIR = Path(r"C:\Users\saart\AppData\Roaming\StickApp")  # e.g. r"C:\Users\you\AppData\Roaming\YourNotesApp"
 
 # Which files inside NOTES_DIR count as notes. Your app saves JSON and XML;
 # broaden it if it writes something else too.

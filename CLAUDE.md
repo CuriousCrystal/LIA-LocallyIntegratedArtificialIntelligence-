@@ -26,7 +26,8 @@ Setup:
 ```
 pip install -r LIA/requirements.txt
 # then provide a key (GROQ_API_KEY for the default provider), either way:
-setx GROQ_API_KEY "gsk-..."                  # a real user env var, or
+setx GEMINI_API_KEY "AIza..."                # default now: Google AI Studio, free
+setx GROQ_API_KEY "gsk-..."                  # or Groq / OPENAI_API_KEY + OPENAI_BASE_URL, or
 cp LIA/.env.example LIA/.env && edit it      # LIA/.env (gitignored, loaded by config.py via python-dotenv)
 # and set NOTES_DIR in LIA/config.py to the sticky-notes app's save folder
 ```
