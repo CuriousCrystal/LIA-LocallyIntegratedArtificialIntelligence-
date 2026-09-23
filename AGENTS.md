@@ -68,14 +68,17 @@ full-feature regression passes, not an executable suite.
   else runs on daemon threads (keyboard reader, idle watchdog, TTS worker).
 - `app.py` is the tray wrapper: fans stdout/stderr into `lia.log`, runs
   `main.main(controls)` on a daemon thread, shows the pystray icon, and — when
-  `MASCOT_ENABLED` — runs `mascot.Mascot` (a Tkinter desktop character) on the
-  main thread.
-- `mascot.py` — frameless always-on-top window, sprite states idle / listening
-  / thinking / speaking (from `LIA/mascot/`), drag to move, left-click toggles
-  listening, right-click menu. `app.py._mascot_state()` picks the pose from
-  `Controls.speaker.is_busy()` (→ `speaking`), `Controls.thinking`, and
-  `Controls.state["listening"]`. A state with no art borrows `idle`'s frames;
-  no art at all → a drawn cat face.
+  `VRM_ENABLED` and a `.vrm` exists — starts `vrm.VrmMascot` (a transparent
+  always-on-top 3D avatar) on its own daemon thread, leaving the main thread
+  to the tray icon.
+- `vrm.py` — the desktop avatar: a loopback HTTP server serves a vendored
+  three.js + `@pixiv/three-vrm` viewer; pywebview shows it frameless,
+  transparent, on-top. States idle / listening / thinking / speaking from
+  `app.py._avatar_state()` (same `Controls` reads as before); blink, breathing
+  and sway are procedural; the mouth is driven by the loudness envelope
+  `voice.set_audio_level_sink` publishes while Piper speaks. Drag to move,
+  left-click toggles listening, right-click menu. Drop any `.vrm` into
+  `LIA/vrm/`; with none she runs tray-only and says so once.
 - `Controls` (in `main.py`) is the object other threads use to pause/quit and
   to read loop state (`thinking`, `speaker`). `panel.Panel` and `Keyboard`
   share a `.pending()/.take()` interface so `read_input()` can't tell stdin
@@ -133,7 +136,8 @@ at the top holds the endpoint and per-capability model ids. Other behavior
 flags: `LISTEN_ENABLED`, `OPEN_MIC`, `WAKE_WORD_ENABLED`,
 `CONVERSATION_WINDOW_SECONDS` (0 = name required every turn), `NOTES_DIR` /
 `NOTES_MAX_NOTES` / `NOTES_MAX_CHARS`, `GREET_ON_START` + `STARTUP_GREETING`
-(static line; the diary-generated greeting is gone), `MASCOT_*`, and
+(static line; the diary-generated greeting is gone), `VRM_ENABLED` / `VRM_DIR`
+/ `VRM_SIZE` / `VRM_POS_FILE`, and
 `SYSTEM_PROMPT` — whose `WHAT YOU THINK` section is what makes her give real
 opinions instead of fence-sitting.
 

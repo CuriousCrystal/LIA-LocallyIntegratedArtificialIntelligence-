@@ -34,6 +34,7 @@ $pyinstaller = @(
     '--collect-all', 'pysilero_vad',    # includes the VAD onnx model
     '--collect-all', 'onnxruntime',
     '--collect-all', 'sounddevice',
+    '--collect-all', 'webview',         # the VRM avatar window
     '--hidden-import', 'pystray._win32',
     '--hidden-import', 'comtypes',
     '--paths', 'LIA',
@@ -48,13 +49,16 @@ if (-not (Test-Path (Join-Path $new 'Lia.exe'))) {
     throw "Build produced no Lia.exe -- the existing app is untouched"
 }
 
-# Voices live beside the exe so you can drop your own in without rebuilding.
+# Voices and the avatar's renderer live beside the exe so you can drop in your
+# own without rebuilding.
 $voicesSrc = Join-Path $PSScriptRoot 'voices'
 if (Test-Path $voicesSrc) { Copy-Item $voicesSrc (Join-Path $new 'voices') -Recurse -Force }
+$vrmSrc = Join-Path $PSScriptRoot 'vrm'
+if (Test-Path $vrmSrc) { Copy-Item $vrmSrc (Join-Path $new 'vrm') -Recurse -Force }
 
-# Carry across whatever the live app already had (her log, the mascot
+# Carry across whatever the live app already had (her log, the avatar
 # position). Nothing else persists -- there is no database.
-foreach ($keep in @('lia.log', 'mascot_pos.json')) {
+foreach ($keep in @('lia.log', 'vrm_pos.json')) {
     $existing = Join-Path $dist $keep
     $rootSeed = Join-Path $root $keep
     if (Test-Path $existing) { Copy-Item $existing (Join-Path $new $keep) -Force }

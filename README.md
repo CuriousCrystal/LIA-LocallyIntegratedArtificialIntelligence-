@@ -149,7 +149,7 @@ back over a window.
 | `llm.py` | the one path to the hosted API — chat, streaming chat, transcription |
 | `voice.py` | speaking (Piper only) and listening (hosted STT + local VAD) |
 | `intent.py` | works out what you meant when no phrase matches |
-| `mascot.py` | the desktop character — idle / listening / thinking / speaking |
+| `vrm.py` | the 3D VRM avatar — drop any `.vrm` into `LIA/vrm/` (see `vrm/README.md`) |
 | `panel.py` | typed window for reaching her without a microphone — currently switched off (`TRAINING_PANEL_ENABLED`) |
 | `fallback_report.py` | reads back `cloud_fallback_log.jsonl` |
 

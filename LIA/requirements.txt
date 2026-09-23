@@ -15,4 +15,5 @@ pysilero-vad>=3.0     # voice activity detection for the open mic (onnx, no torc
 
 # --- running as a background app ---
 pystray>=0.19         # system tray icon
-Pillow>=10.0          # draws the tray icon and the mascot's fallback face
+Pillow>=10.0          # draws the tray icon
+pywebview>=5.0        # the VRM avatar's transparent always-on-top window (WebView2)

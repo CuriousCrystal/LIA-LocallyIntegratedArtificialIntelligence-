@@ -29,6 +29,7 @@ import llm
 import queue
 import re
 import threading
+import time
 from pathlib import Path
 
 from config import (
@@ -47,11 +48,24 @@ from config import (
 
 SAMPLE_RATE_IN = 16000  # mic capture rate, and what the transcription API is sent
 
+# The avatar's mouth-follow callback (vrm.py), or None. See set_audio_level_sink.
+_audio_level_sink = None
+
 
 # --------------------------------------------------------------- helpers ---
 
 def _play(audio, sample_rate):
     import sounddevice as sd
+
+    # Loudness envelope, computed before playback: while sd.wait() blocks, a
+    # helper thread walks the envelope in real time so the VRM avatar's mouth
+    # tracks her voice (see vrm.py). One abs() over samples already about to
+    # play -- and nothing at all when no avatar is showing.
+    env = _level_envelope(audio, sample_rate)
+    follower = None
+    if env and _audio_level_sink is not None:
+        follower = threading.Thread(target=_follow_envelope, args=(env,), daemon=True)
+        follower.start()
 
     sd.play(audio, sample_rate)
     try:
@@ -59,6 +73,77 @@ def _play(audio, sample_rate):
     except KeyboardInterrupt:
         sd.stop()
         raise
+    finally:
+        if follower is not None:
+            follower.join()
+
+
+# ------------------------------------------------- what the avatar listens to ---
+# vrm.py registers a callback here while the 3D avatar is on screen: it receives
+# the loudness of her voice (0..1), about twenty times a second, so the model's
+# mouth moves with the actual audio instead of guessing when words happen.
+# Never the reason a turn fails -- a sink that raises is dropped, not propagated.
+_LEVEL_HZ = 20                       # envelope resolution, levels per second
+
+
+def set_audio_level_sink(fn) -> None:
+    """Register fn(level) to follow her speech loudness, or None to clear."""
+    global _audio_level_sink
+    _audio_level_sink = fn
+
+
+def _level_envelope(audio, sample_rate) -> list:
+    """[(offset_seconds, level 0..1), ...] for one utterance, or [] if quiet.
+
+    RMS per window, scaled so ordinary Piper speech reads as a lively mouth
+    without pinning at full open.
+    """
+    try:
+        import numpy as np
+
+        x = audio.astype(np.float32)
+        if x.ndim > 1:
+            x = x.mean(axis=1)
+        x = np.abs(x) / 32768.0
+        win = max(1, int(sample_rate / _LEVEL_HZ))
+        n = (len(x) // win) * win
+        if n == 0:
+            return []
+        rms = np.sqrt((x[:n].reshape(-1, win) ** 2).mean(axis=1))
+        rms = np.clip(rms * 3.0, 0.0, 1.0)
+        return [(i / _LEVEL_HZ, float(v)) for i, v in enumerate(rms) if v > 0.02]
+    except Exception:
+        return []
+
+
+def _follow_envelope(env) -> None:
+    """Replay a loudness envelope in real time into the sink, then fall to 0.
+
+    Runs on its own thread, in lockstep with sd.play() which was started right
+    after it; ends when the envelope does, releasing _play's join().
+    """
+    t0 = time.monotonic()
+    end = env[-1][0] + 0.25
+    i = 0
+    while True:
+        now = time.monotonic() - t0
+        while i < len(env) and env[i][0] <= now:
+            sink = _audio_level_sink
+            if sink is not None:
+                try:
+                    sink(env[i][1])
+                except Exception:
+                    set_audio_level_sink(None)   # a broken sink never breaks audio
+            i += 1
+        if now > end or i >= len(env):
+            break
+        time.sleep(0.02)
+    sink = _audio_level_sink
+    if sink is not None:
+        try:
+            sink(0.0)
+        except Exception:
+            pass
 
 
 # Small models like to emit stage directions -- "*soft, gentle tone*" -- and a

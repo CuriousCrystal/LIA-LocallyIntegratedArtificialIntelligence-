@@ -141,36 +141,31 @@ IDLE_MINUTES = 12
 # starts headless -- a place to type without a microphone or a console.
 TRAINING_PANEL_ENABLED = False
 
-# --- desktop mascot ---
-# A small always-on-top character that sits on the desktop and shows what she's
-# doing -- idle / listening / thinking / speaking -- in place of a spoken
-# greeting at startup. Runs alongside the tray icon (which stays the reliable
-# control surface); the mascot is the visible presence. See mascot/README.md.
-MASCOT_ENABLED = False
+# --- desktop avatar (VRM) ---
+# A 3D VRM character floating over the desktop in a transparent, always-on-top
+# window -- the format VTuber apps use. She breathes, blinks and glances
+# around; her mouth follows the real loudness of Piper's audio; and she shows
+# idle / listening / thinking / speaking like the 2D mascot did. Rendered
+# locally (three.js + three-vrm vendored in vrm/vendor/, loopback server, no
+# network). Runs alongside the tray icon, which stays the reliable control
+# surface. See vrm/README.md.
+VRM_ENABLED = True
 
-# Folder holding the sprite frames. One PNG (or numbered PNGs, or a GIF) per
-# state: idle, listening, thinking, speaking. Missing frames fall back to a
-# plain drawn cat face, so she still shows up before any art is added.
-MASCOT_DIR = BASE_DIR / "mascot"
+# The model: drop any .vrm into this folder -- the first one found is used.
+# VRM 0.x and 1.0 both work; full-body models read best at this size. With no
+# .vrm here she runs tray-only and says so once.
+VRM_DIR = BASE_DIR / "vrm"
 
-# Size of the (square) mascot window in pixels; the sprite is scaled to fit
-# inside it on its longest side. 300 suits the full-body character art in
-# mascot/ -- at the old 140 she was a thumbnail. Drop it back down for a small
-# chibi/face sprite.
-MASCOT_SIZE = 300
+# Window size in pixels (square-ish; the 3D view is the full window). 420
+# frames a full-body model comfortably; raise it if you want her life-size.
+VRM_SIZE = 420
 
-# Animation speed, frames per second, when a state has more than one frame.
-MASCOT_FPS = 8
+# One accepted limitation of the transparent WebView2 window: clicks on
+# transparent pixels still land on her window, so the rectangle in front of
+# her is hers. She is small; the desktop around her is not.
 
-# Any pixel of exactly this colour is punched fully transparent (Windows
-# per-window "transparent colour"). The sprite canvas is filled with it, so
-# whatever your PNGs don't cover shows the desktop through. Pick something your
-# art never actually uses. PNG alpha edges may fringe slightly against it -- for
-# crisp edges, matte the sprite onto this colour in your image editor.
-MASCOT_CHROMA = "#ff00ff"
-
-# Where the mascot's on-screen position is remembered between runs.
-MASCOT_POS_FILE = DATA_DIR / "mascot_pos.json"
+# Where the avatar's on-screen position is remembered between runs.
+VRM_POS_FILE = DATA_DIR / "vrm_pos.json"
 
 # ---------------------------------------------------------------- voice ----
 # Lia speaks her replies out loud, and listens for you.

@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import main as lia
 import panel as panel_module
-from config import IDLE_MINUTES, DATA_DIR, TRAINING_PANEL_ENABLED, MASCOT_ENABLED
+from config import IDLE_MINUTES, DATA_DIR, TRAINING_PANEL_ENABLED, VRM_ENABLED
 
 # DATA_DIR, not __file__: inside a packaged .exe __file__ lives in a temporary
 # unpack folder that's deleted on exit, taking the log with it.
@@ -152,14 +152,30 @@ class LiaApp:
         self.icon = None
         self._thread = None
         self.panel = None
-        self.mascot = None
-        # The mascot and the training panel both want the main thread for a
-        # Tkinter loop; only one can have it. The panel is off by default and
-        # is the fallback for a machine with no mic, so it wins when both are
-        # asked for.
-        self.use_mascot = MASCOT_ENABLED and not TRAINING_PANEL_ENABLED
-        if MASCOT_ENABLED and TRAINING_PANEL_ENABLED:
-            print("[mascot disabled: the training panel is on and needs the same thread]")
+        self.avatar = None
+        # The avatar (pywebview) runs its loop happily on a daemon thread, so
+        # unlike the old Tk mascot it never fights the training panel for the
+        # main thread -- but the panel is still the deliberate no-window path,
+        # so it wins when both are asked for.
+        self.use_vrm = VRM_ENABLED and not TRAINING_PANEL_ENABLED
+        if VRM_ENABLED and TRAINING_PANEL_ENABLED:
+            print("[avatar disabled: the training panel is on]")
+        if self.use_vrm:
+            try:
+                import vrm as vrm_module
+                model = vrm_module.find_model()
+            except ImportError:
+                vrm_module, model = None, None
+            if model is not None:
+                self.avatar = vrm_module.VrmMascot(
+                    model,
+                    state_fn=self._avatar_state,
+                    on_click=self.toggle_listening,
+                    menu_fn=self._avatar_menu,
+                )
+            else:
+                print("[avatar: no .vrm model in LIA/vrm/ -- drop one in and "
+                      "restart, or see vrm/README.md]")
         if TRAINING_PANEL_ENABLED:
             # Created here, not in run(): cli() needs it to exist before the
             # log redirect is set up, so the very first startup line printed
@@ -203,17 +219,17 @@ class LiaApp:
             self.icon.stop()
         if self.panel is not None:
             self.panel.quit_requested.set()
-        if self.mascot is not None:
-            self.mascot.stop()
+        if self.avatar is not None:
+            self.avatar.stop()
 
     def _refresh(self):
         if self.icon is not None:
             self.icon.icon = make_icon(self._listening(), self._speaking())
             self.icon.update_menu()
 
-    # -- desktop mascot --------------------------------------------------
+    # -- desktop avatar (VRM) ---------------------------------------------
 
-    def _mascot_state(self) -> str:
+    def _avatar_state(self) -> str:
         c = self.controls
         if c.speaker is not None and c.speaker.is_busy() and c.speaker.enabled:
             return "speaking"
@@ -223,14 +239,14 @@ class LiaApp:
             return "listening"
         return "idle"
 
-    def _mascot_menu(self):
+    def _avatar_menu(self):
         return [
             (f"Listening: {'on' if self._listening() else 'off'}", self.toggle_listening),
             (f"Speaking: {'on' if self._speaking() else 'off'}", self.toggle_voice),
             ("-", None),
             ("Open log", self.open_log),
             ("-", None),
-            ("Hide mascot", lambda: self.mascot and self.mascot.hide()),
+            ("Hide avatar", lambda: self.avatar and self.avatar.hide()),
             ("Quit", self.quit),
         ]
 
@@ -243,13 +259,13 @@ class LiaApp:
             traceback.print_exc()
         finally:
             # If the conversation loop dies, don't leave a zombie tray icon,
-            # panel window, or mascot behind.
+            # panel window, or avatar behind.
             if self.icon is not None:
                 self.icon.stop()
             if self.panel is not None:
                 self.panel.quit_requested.set()
-            if self.mascot is not None:
-                self.mascot.stop()
+            if self.avatar is not None:
+                self.avatar.stop()
 
     def run(self):
         from pystray import Icon, Menu, MenuItem
@@ -273,19 +289,13 @@ class LiaApp:
         # pystray's docs say run() belongs on the main thread for cross-platform
         # correctness -- except on Windows, where its backend is a per-thread
         # Win32 message loop and running it off the main thread is documented as
-        # safe. This project is Windows-only, so when a Tkinter loop (the mascot
-        # or the panel) needs the main thread, pystray gives it up.
-        if self.use_mascot:
-            import mascot as mascot_module
+        # safe. This project is Windows-only, so either loop can take the main
+        # thread: the avatar runs on its own daemon thread, and the panel --
+        # when asked for -- keeps its old Tkinter claim on the main one.
+        if self.avatar is not None:
+            threading.Thread(target=self.avatar.mainloop, daemon=True).start()
 
-            self.mascot = mascot_module.Mascot(
-                state_fn=self._mascot_state,
-                on_click=self.toggle_listening,
-                menu_fn=self._mascot_menu,
-            )
-            threading.Thread(target=self.icon.run, daemon=True).start()
-            self.mascot.mainloop()
-        elif self.panel is not None:
+        if self.panel is not None:
             threading.Thread(target=self.icon.run, daemon=True).start()
             self.panel.mainloop()
         else:

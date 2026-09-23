@@ -119,7 +119,7 @@ class Controls:
         self.headless = headless
         self.quit = threading.Event()
         # Set while a reply is being generated but before the first word is
-        # spoken -- the desktop mascot reads it to show a "thinking" pose.
+        # spoken -- the desktop avatar reads it to show a "thinking" pose.
         self.thinking = threading.Event()
         self.speaker: "voice.Speaker | None" = None
         # Set by app.py before main() starts, when the typed training panel
