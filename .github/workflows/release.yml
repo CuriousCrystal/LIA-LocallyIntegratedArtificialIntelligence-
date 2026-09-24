@@ -48,3 +48,23 @@ jobs:
         with:
           files: Lia-windows.zip
           generate_release_notes: true
+          # generate_release_notes only lists commits -- someone landing on
+          # this page from a shared link has no other context, so the actual
+          # "how do I run this" steps go in the body instead of assuming
+          # they'll go find the README.
+          body: |
+            ## Running Lia
+
+            1. Download and unzip `Lia-windows.zip`.
+            2. Install [Ollama](https://ollama.com) and leave it running.
+            3. Pull the model she talks with:
+               ```
+               ollama pull phi3:mini
+               ```
+            4. Run `Lia.exe`. No API key, no other setup -- chat and
+               speech-to-text both run on your machine.
+
+            Drop `.txt` files into the `notes` folder next to `Lia.exe` for
+            her to remember, and an image into `assets` (then re-run) for
+            your own tray icon. Full details: see the repository's
+            [README](https://github.com/${{ github.repository }}#readme).
