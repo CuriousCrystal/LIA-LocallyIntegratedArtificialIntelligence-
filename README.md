@@ -15,6 +15,17 @@ A 3D avatar sits fixed in the top-left corner of your screen (not
 always-on-top, so other windows can cover her); click her to open a small chat
 window — type, or press its mic button for one recorded question at a time.
 
+**Windows only, and not a short-term gap.** The avatar's transparency,
+click-through and taskbar behavior are built directly on Win32 (`ctypes` calls
+into `user32`/`gdi32`/`dwmapi`), the chat panel's custom font and icon loading
+do the same, and the shortcut/autostart tooling writes real Windows `.lnk`
+files. Porting to Linux or macOS means reworking the avatar window for each
+platform's own windowing APIs and replacing the startup/shortcut tooling
+entirely (`.desktop` files on Linux, an `.app` bundle or LaunchAgent on
+macOS) — a real project, not a compatibility flag. The model, notes, and chat
+logic underneath are already plain Python and would need little to no change;
+it's specifically the desktop-integration layer that's Windows-specific.
+
 This page is the short version. [`LIA/README.md`](LIA/README.md) is the full
 reference.
 
