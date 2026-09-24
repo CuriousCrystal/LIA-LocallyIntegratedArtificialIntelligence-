@@ -44,7 +44,7 @@ from config import (
     VRM_CLICK_THROUGH, VRM_CLICK_THROUGH_GROW,
     VRM_QUALITY, VRM_FPS_ACTIVE, VRM_FPS_IDLE, VRM_FPS_SPEAKING,
     VRM_PIXEL_RATIO, VRM_ANTIALIAS, VRM_TEXTURE_MAX, VRM_SPRING_HZ,
-    VRM_MODEL, VRM_PAUSE_HIDDEN,
+    VRM_MODEL, VRM_PAUSE_HIDDEN, VRM_MARGIN, VRM_MIN_SIZE, VRM_MAX_SIZE,
 )
 
 # Best effort, and only that: WebView2 reads this when it creates the browser
@@ -602,6 +602,9 @@ class _Api:
 
     def clicked(self):
         self._m._on_click()
+
+    def resize_by(self, delta: float):
+        self._m.resize(int(delta))
 
     def drag_done(self):
         self._m._save_pos()
@@ -1207,20 +1210,42 @@ class VrmMascot:
         # it from the constructor held every app start for its full 15-second
         # event timeout, invisibly, inside LiaApp.__init__.
 
-    # -- placement ----------------------------------------------------------
+    # -- placement and size -------------------------------------------------
+
+    def _size(self) -> int:
+        """Her window's current width, within the configured limits."""
+        try:
+            saved = json.loads(Path(VRM_POS_FILE).read_text())
+            return int(saved.get("w", VRM_SIZE))
+        except Exception:
+            return VRM_SIZE
 
     def _place(self):
         user32 = ctypes.windll.user32
         sw, sh = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
-        x, y = sw - VRM_SIZE - 40, sh - VRM_SIZE - 110     # bottom-right default
+        # The work area is the screen minus the taskbar -- the part of the
+        # screen that is hers to live in, and the right thing to anchor a
+        # bottom-right default to and to clamp a stale saved position against.
+        class RECTC(ctypes.Structure):
+            _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                        ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+        work = RECTC()
+        if user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(work)):  # SPI_GETWORKAREA
+            sw, sh = work.right - work.left, work.bottom - work.top
+        size = self._size()
+        x, y = sw - size - VRM_MARGIN, sh - size - VRM_MARGIN   # bottom-right
         try:
             saved = json.loads(Path(VRM_POS_FILE).read_text())
             x, y = int(saved["x"]), int(saved["y"])
         except Exception:
             pass
-        x = max(0, min(x, sw - VRM_SIZE))
-        y = max(0, min(y, sh - VRM_SIZE))
+        # A saved position from a bigger window (or an older build) must not
+        # strand her off-screen.
+        x = max(0, min(x, sw - size))
+        y = max(0, min(y, sh - size))
         try:
+            self.window.resize(size, size + 30)
             self.window.move(x, y)
         except Exception:
             pass
@@ -1228,7 +1253,24 @@ class VrmMascot:
     def _save_pos(self):
         try:
             Path(VRM_POS_FILE).write_text(json.dumps(
-                {"x": self.window.x, "y": self.window.y}))
+                {"x": self.window.x, "y": self.window.y,
+                 "w": self.window.width}))
+        except Exception:
+            pass
+
+    def resize(self, delta: int):
+        """Grow or shrink her window by whole steps, re-shape to the new
+        silhouette, and remember it. Clamped to VRM_MIN_SIZE/VRM_MAX_SIZE."""
+        size = max(VRM_MIN_SIZE, min(VRM_MAX_SIZE, self._size() + delta))
+        if size == self._size():
+            return
+        try:
+            self.window.resize(size, size + 30)
+            # The silhouette mask is in old-window coordinates; the region
+            # must be rebuilt for the new frame or it clips the wrong shape.
+            self._shape_ready.clear()
+            threading.Thread(target=self.shape_window, daemon=True).start()
+            self._save_pos()
         except Exception:
             pass
 

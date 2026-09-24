@@ -156,9 +156,22 @@ VRM_ENABLED = True
 # .vrm here she runs tray-only and says so once.
 VRM_DIR = BASE_DIR / "vrm"
 
-# Window size in pixels (square-ish; the 3D view is the full window). 420
-# frames a full-body model comfortably; raise it if you want her life-size.
-VRM_SIZE = 420
+# Window size in pixels (square-ish; the 3D view is the full window). The
+# canvas is rendered at this size too -- fewer pixels is less GPU -- and the
+# click-through shape, the position and the portrait framing all follow it.
+# 240 is a bit over half of the 420 she launched with: big enough that her
+# face reads, small enough to live in a screen corner without being in the
+# way. Raise it if you want her life-size.
+VRM_SIZE = 240
+
+# When she has never been dragged anywhere, she sits this far in from the
+# bottom-right of the work area (the screen minus the taskbar).
+VRM_MARGIN = 24
+
+# Limits for resizing her window ("Bigger" / "Smaller" on her menu, or the
+# tray icon's). Both are window widths in pixels; the height follows.
+VRM_MIN_SIZE = 160
+VRM_MAX_SIZE = 520
 
 # "portrait" frames her head and shoulders -- the face fills the window and
 # reads from across the desk. "full" shows the whole body, which suits a
