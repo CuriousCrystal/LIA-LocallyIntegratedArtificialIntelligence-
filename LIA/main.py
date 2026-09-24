@@ -53,6 +53,7 @@ from config import (
     NOTES_DIR,
     SPOKEN_COMMANDS,
     CLOUD_HISTORY_TURNS,
+    LOCAL_CHAT_MODEL,
 )
 
 HELP = """
@@ -506,14 +507,14 @@ def main(controls: "Controls | None" = None):
         controls.speaker = speaker
         controls.state = state
 
-    # She thinks, hears and speaks over a hosted API now. With no key set she
-    # still runs -- the mic and the wake word work -- but she can't answer and
-    # can't transcribe. Said once, here, rather than as a failure on the first
-    # thing you say to her.
+    # She thinks and hears through a local model (Ollama + faster-whisper)
+    # now. If Ollama isn't running or the model isn't pulled yet, she still
+    # runs -- the mic and the wake word work -- but she can't answer. Said
+    # once, here, rather than as a failure on the first thing you say to her.
     if not llm.have_key():
-        print("[no API key set -- she can hear the mic, but can't think or transcribe]")
-        print("[put GROQ_API_KEY in LIA/.env (free at console.groq.com), or an "
-              "OPENAI_API_KEY with OPENAI_BASE_URL repointed, then restart]")
+        print("[can't reach the local model -- she can hear the mic, but can't think]")
+        print(f"[make sure Ollama is running and `ollama pull {LOCAL_CHAT_MODEL}` "
+              "has been done, then restart]")
 
     # Her memory is read-only and external, so there is nothing to migrate and
     # nothing to open at startup: the notes folder is checked lazily, on the
@@ -611,26 +612,21 @@ def main(controls: "Controls | None" = None):
             print("\n  [interrupted]\n")
             continue
         except (requests.RequestException, llm.CloudError) as exc:
-            # The model went away -- no key, rate limited, dropped connection.
-            # There is no local model to fall back to, so say so plainly and
+            # The model went away -- Ollama not running, model not pulled,
+            # dropped mid-stream. There is no fallback, so say so plainly and
             # let her carry on rather than dying and taking the tray icon with
             # us. If anything was already spoken this turn it stands.
             clear_status()
             if pieces:
                 print("\n  [that reply may be cut short -- lost contact with the model]\n")
                 speaker.say("Sorry, I lost my train of thought there.")
-            elif isinstance(exc, llm.QuotaExhausted):
-                print("\n  [the API account is out of credit -- add some at "
-                      "platform.openai.com/settings/organization/billing]\n")
-                speaker.say("The API account is out of credit -- that's a billing thing, "
-                            "not something that'll clear on its own.")
             elif isinstance(exc, llm.RateLimited):
-                print("\n  [model is rate limited right now -- per-minute, or the "
-                      "daily free cap]\n")
-                speaker.say("I'm being rate limited right now -- give it a bit and try again.")
+                print("\n  [the model server is rate limited right now]\n")
+                speaker.say("The model's being rate limited right now -- give it a bit and try again.")
             elif not llm.have_key():
-                print("\n  [no API key set -- I can't answer]\n")
-                speaker.say("There's no API key set, so I can't think right now.")
+                print(f"\n  [can't reach the local model -- make sure Ollama is running "
+                      f"and `ollama pull {LOCAL_CHAT_MODEL}` has been done]\n")
+                speaker.say("I can't reach my model right now -- make sure Ollama is running.")
             else:
                 print(f"\n  [couldn't reach the model: {exc}]\n")
                 speaker.say("I couldn't reach the model just now. Try me again in a bit.")

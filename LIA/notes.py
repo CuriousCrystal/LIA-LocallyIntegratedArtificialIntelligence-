@@ -1,108 +1,36 @@
-"""Lia's memory: your sticky notes, read-only.
+"""Lia's memory: your own text files, read-only.
 
-She no longer keeps a database of her own. Everything she knows about you
-lives in your sticky-notes application, and this module is the one place that
-reads it. Her side of the deal is strictly read-only: she can never add,
-change or delete a note. If something should be remembered, you write it in
-your notes app -- the same way you always have -- and it simply becomes part
-of what she knows. Nothing she "learns" can exist anywhere you haven't written
-it down yourself, which is the whole reason her invented-facts problem is now
-structurally impossible rather than merely switched off.
+She keeps no database of her own. Everything she knows about you lives in
+plain .txt files you write yourself -- in Notepad or anything else -- and
+this module is the one place that reads them. Her side of the deal is
+strictly read-only: she can never add, change or delete a note. If something
+should be remembered, you write it in a .txt file in NOTES_DIR (config.py),
+and it simply becomes part of what she knows. Nothing she "learns" can exist
+anywhere you haven't written it down yourself, which is the whole reason her
+invented-facts problem is structurally impossible rather than merely
+switched off.
 
-The app this reads is a C# sticky-notes program of the user's own, which
-saves its notes as JSON or XML files in one folder (NOTES_DIR in config.py).
-Any layout fits: every matching file is opened, and readable text is pulled
-from whatever shape it finds -- a list of note objects, a bare list of
-strings, a single note object, a JSON string, or an XML element tree. Note
-fields (title, body, text, content, ...) are joined and rendered as plain
-text; ids, dates, window positions and the like are skipped.
-
-Pictures the person pastes into notes are invisible to her, on purpose: she
-has no eyes and no OCR, and a pasted screenshot arrives in the file as a
-base64 blob that would otherwise be read as thousands of characters of
-"iVBORw0KGgo..." and treated as their words. Image fields, image file paths
-and inlined data URIs are all stripped before anything reaches her prompt.
+Every non-blank line of every .txt file in the folder is one note. No
+format to match, no fields to parse -- you write a line, she can read it.
 
 Failures are surfaced, never swallowed silently: a folder that doesn't exist
-and a file that won't parse are each printed in [brackets] -- once per state
+and a file that won't read are each printed in [brackets] -- once per state
 change, not once per turn, so a problem you haven't fixed nags you without
 spamming every reply. An empty or missing folder just means she has no notes:
 she starts knowing nothing about you and says so when asked, rather than
 guessing.
 """
 
-import json
 import re
 import threading
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from config import NOTES_DIR, NOTES_PATTERN, NOTES_MAX_NOTES, NOTES_MAX_CHARS
 
-# Field names that carry the readable text of a note, checked longest-first so
-# "notetext" wins over "text" and a "body" beats a "name". Case and separators
-# are ignored, so "NoteText", "note_text" and "notetext" all hit.
-_TEXT_FIELDS = (
-    "notetext", "body", "text", "content", "note", "message", "description",
-    "title", "name", "value",
-)
-
-# Keys that are metadata about a note rather than its text -- ids, dates,
-# flags, window geometry. Skipped rather than rendered, so a note reads as its
-# words instead of "3 2024-01-01 true 400 300".
-_META_FIELDS = re.compile(
-    r"^(id|uid|guid|key|index|idx|number|pos|position|order|seq|color|colour|"
-    r"theme|created|createdat|createdon|updated|updatedat|modified|modifiedat|"
-    r"edited|editedat|lastmodified|pinned|pinnedat|pinnedon|deleted|deletedat|"
-    r"isdeleted|ispinned|ismodified|isvisible|visible|opacity|"
-    r"left|top|x|y|width|height|window|screen|z|zindex)$",
-    re.IGNORECASE,
-)
-
-# Keys that hold binary attachments -- a pasted screenshot, a photo. Their
-# value is a base64 blob (or a file path to one), and reading it as note text
-# would pour thousands of characters of "iVBORw0KGgo..." into her prompt as if
-# it were the person's words. She has no eyes: she can't see a picture, so an
-# image field is skipped entirely -- no fallback, no OCR, no guess at its
-# contents.
-_BINARY_FIELDS = re.compile(
-    r"^(image|images|imagepath|imagedata|imagedata64|picture|photo|attachment|"
-    r"attachments|screenshot|snapshot|blob|thumbnail|icon|base64|data)$",
-    re.IGNORECASE,
-)
-
-# A base64 image rides inside a "text" value whenever an app inlines it (a
-# data URI is the usual shape, but some C# serializers paste the bare blob).
-# Both are cut before the value is treated as words. The base64 class carries
-# no whitespace: with \s allowed, a blob matched greedily across the space
-# that followed it and swallowed the real words after it -- "here is the
-# mockup <blob> and login is admin" lost "and login is admin". Padding (=)
-# is inside the run class for the same reason: a PNG's header is shorter than
-# the minimum run, and a = in the middle broke the run in two and left the
-# header behind. Long unbroken runs like this don't occur in real note text.
-_DATA_URI = re.compile(r"data:image/[^;\s]{0,40};base64,[A-Za-z0-9+/=]+", re.IGNORECASE)
-_BASE64_RUN = re.compile(r"[A-Za-z0-9+/=]{200,}")
-_BASE64_TAG = re.compile(r"(?i)\[[^\]]{0,30}(image|picture|photo|screenshot)[^\]]{0,30}\]")
-
-# What's left of an image-only note once its blob is cut: a bare label like
-# "photo" from the title field. Dropped at the scan level -- it is the husk
-# of a picture, not words the person wrote, and she must not read it as one.
-# A real note keeps its other words ("photo of the contract" doesn't match).
-_MEDIA_LABEL = re.compile(
-    r"^(?:the\s+)?(?:image|images|picture|pics?|photo|photos|screenshot|snapshot|attachment|img)(?:\s+\d+)?$",
-    re.IGNORECASE,
-)
-
-# Timestamps and bare numbers are metadata about a note, never its content.
-_ISO_DATE = re.compile(
-    r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$"
-)
-_NUM = re.compile(r"^-?\d+(\.\d+)?$")
-
 _WS = re.compile(r"\s+")
 
 # The two states reported to the user: which folder is missing, and which
-# files won't parse. Kept between calls so each is printed once when it
+# files won't read. Kept between calls so each is printed once when it
 # appears and once when it goes away -- not on every turn of the conversation.
 _reported: dict = {"missing": False, "broken": frozenset()}
 
@@ -110,139 +38,37 @@ _lock = threading.Lock()
 _cache: dict = {"stamps": None, "notes": []}
 
 
-def _scalar_text(value) -> str:
-    """The readable text of one leaf value, or "" for metadata."""
-    if value is None or isinstance(value, bool):
-        return ""
-    if isinstance(value, (int, float)):
-        return "" if _NUM.match(str(value)) else str(value)
-    if isinstance(value, str):
-        s = value.strip()
-        return "" if (_NUM.match(s) or _ISO_DATE.match(s)) else s
-    return ""
-
-
-def _strip_binary(s: str) -> str:
-    """Cut embedded image payloads out of otherwise-text values.
-
-    Applied to every string that survives the field filters, so a note whose
-    body is "here's the mockup data:image/png;base64,iVBORw0KGgo... and the
-    login is admin" still yields "here's the mockup and the login is admin"
-    instead of the blob. Nothing is emitted for what was cut -- she has no
-    eyes, and pretending otherwise ("[image of a chart]") would be exactly
-    the invention her memory must never contain.
-    """
-    s = _DATA_URI.sub(" ", s)
-    s = _BASE64_RUN.sub(" ", s)
-    s = _BASE64_TAG.sub(" ", s)
-    return s
-
-
-def _flatten(value, out: list):
-    """Collect readable strings from any JSON shape, depth-first."""
-    if value is None or isinstance(value, (bool, int, float, str)):
-        text = _scalar_text(value)
-        if text:
-            out.append(text)
-        return
-    if isinstance(value, dict):
-        # Named fields first (title, body, ...), in _TEXT_FIELDS order; then
-        # the unnamed non-metadata leaves, in file order; then nested
-        # structures, depth-first.
-        named, rest = [], []
-        seen = set()
-        for key, item in value.items():
-            k = re.sub(r"[^a-z]", "", str(key).lower())
-            if _META_FIELDS.match(k) or _BINARY_FIELDS.match(k):
-                continue
-            if k in _TEXT_FIELDS and k not in seen and not isinstance(item, (dict, list)):
-                seen.add(k)
-                text = _scalar_text(item)
-                if text:
-                    named.append((_TEXT_FIELDS.index(k), text))
-            elif not isinstance(item, (dict, list)):
-                text = _scalar_text(item)
-                if text:
-                    rest.append(text)
-        named.sort(key=lambda pair: pair[0])
-        for _, text in named:
-            out.append(text)
-        for text in rest:
-            out.append(text)
-        for item in value.values():
-            if isinstance(item, (dict, list)):
-                _flatten(item, out)
-        return
-    if isinstance(value, list):
-        for item in value:
-            _flatten(item, out)
-
-
-def _texts_from_json(raw: str) -> list[str]:
-    out: list[str] = []
-    _flatten(json.loads(raw), out)
-    return out
-
-
-def _texts_from_xml(raw: str) -> list[str]:
-    try:
-        root = ET.fromstring(raw)
-    except ET.ParseError:
-        raise ValueError("not well-formed XML") from None
-
-    out: list[str] = []
-
-    def walk(element):
-        # An element carrying text is a field of a note; children are walked
-        # too. Metadata names are skipped either way round the file lays it
-        # out -- <id>3</id> is not a note. Binary fields (a pasted image) are
-        # skipped with their whole subtree: there is no text in them to find.
-        tag = re.sub(r"[^a-z]", "", element.tag.lower())
-        if _BINARY_FIELDS.match(tag):
-            return
-        text = (element.text or "").strip()
-        if text and not _META_FIELDS.match(tag):
-            value = _scalar_text(text)
-            if value:
-                out.append(value)
-        for child in element:
-            walk(child)
-
-    walk(root)
-    return out
-
-
 def _file_texts(path: Path) -> list[str]:
+    """Every non-blank line of a .txt file, whitespace collapsed."""
     raw = path.read_text(encoding="utf-8", errors="replace")
-    if path.suffix.lower() == ".xml":
-        return _texts_from_xml(raw)
-    return _texts_from_json(raw)
+    lines = []
+    for line in raw.splitlines():
+        line = _WS.sub(" ", line).strip()
+        if line:
+            lines.append(line)
+    return lines
 
 
 def _matching_paths() -> list[Path]:
     folder = Path(NOTES_DIR)
     if not folder.is_dir():
         return []
-    return sorted(p for p in folder.glob(NOTES_PATTERN)
-                  if p.suffix.lower() in (".json", ".xml"))
+    return sorted(p for p in folder.glob(NOTES_PATTERN) if p.suffix.lower() == ".txt")
 
 
 def _scan(paths: list[Path]) -> tuple[list[str], list[str]]:
     """Read every matching file fresh: (notes, broken-file reports).
 
-    One unparsable file leaves its report behind but doesn't cost the notes
-    that did read -- your app may simply be mid-save, and dropping everything
+    One unreadable file leaves its report behind but doesn't cost the notes
+    that did read -- you may simply be mid-save, and dropping everything
     because one file was half-written would make her memory flicker.
     """
     notes: list[str] = []
     broken: list[str] = []
     for path in paths:
         try:
-            for text in _file_texts(path):
-                text = _WS.sub(" ", _strip_binary(text)).strip()
-                if len(text) >= 2 and not _MEDIA_LABEL.match(text):
-                    notes.append(text)
-        except (ValueError, OSError) as exc:
+            notes.extend(_file_texts(path))
+        except OSError as exc:
             broken.append(f"{path.name} -- {exc}")
 
     # The cap keeps one runaway folder from pushing a thousand notes into
@@ -267,7 +93,7 @@ def all_notes() -> list[str]:
 
     Returns [] when the folder is missing or has no notes yet -- a normal
     state, not an error. Unreadable files are reported in brackets the first
-    time they fail and once more when they're fixed; whatever did parse is
+    time they fail and once more when they're fixed; whatever did read is
     still returned, so one bad file never blanks her memory.
     """
     global _reported

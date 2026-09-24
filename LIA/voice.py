@@ -6,9 +6,9 @@ There is no cloud voice and no Windows SAPI fallback any more -- both were
 removed with the rest of her cloud-control features, and one honest failure
 ("couldn't load a voice") beats two code paths where one ever drifts.
 
-Listening is a hosted API (llm.transcribe). Everything here degrades
-gracefully: a failed transcription is treated as silence -- a companion that
-goes quiet beats one that dies mid-sentence.
+Listening is local too (llm.transcribe, faster-whisper). Everything here
+degrades gracefully: a failed transcription is treated as silence -- a
+companion that goes quiet beats one that dies mid-sentence.
 
 Voice activity detection (pysilero-vad) stays on this machine: it decides when
 you have stopped talking, before any audio is sent anywhere.
@@ -388,13 +388,13 @@ class SentenceBuffer:
 # -------------------------------------------------------------- listening ---
 
 class Listener:
-    """Speech recognition -- a hosted API (OPENAI_TRANSCRIBE_MODEL, via
-    llm.transcribe). The recorded utterance is sent as a WAV and comes back as
-    text.
+    """Speech recognition -- local faster-whisper (LOCAL_WHISPER_MODEL, via
+    llm.transcribe). The recorded utterance is transcribed on this machine and
+    comes back as text.
 
-    The only model that loads on this machine is the voice activity detector,
-    which decides when you have stopped talking. Nothing else here needs
-    warming up.
+    warm_up() below only loads the voice activity detector; the whisper model
+    itself loads lazily on first real transcription (see llm._get_whisper_model)
+    rather than paying that cost before she's ever asked to listen.
     """
 
     def __init__(self):

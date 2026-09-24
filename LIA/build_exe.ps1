@@ -2,9 +2,11 @@
 #
 #   powershell -ExecutionPolicy Bypass -File LIA\build_exe.ps1
 #
-# Produces dist\Lia\Lia.exe -- double-clickable, no console, no Python needed on
-# the machine. The API key still has to be in the environment; it is never
-# bundled.
+# Produces dist\Lia\Lia.exe -- double-clickable, no console, no Python needed
+# on the machine. Chat and speech-to-text are local (Ollama + faster-whisper),
+# so there is no API key to set -- but Ollama itself is a separate install
+# (ollama.com) that has to be running, and its model (config.py's
+# LOCAL_CHAT_MODEL) has to be pulled, on whatever machine runs this exe.
 #
 # Builds into a staging folder first and swaps at the end. Lia is usually
 # installed in Startup, so a half-written dist\Lia is something Windows will
@@ -35,6 +37,9 @@ $pyinstaller = @(
     '--collect-all', 'onnxruntime',
     '--collect-all', 'sounddevice',
     '--collect-all', 'webview',         # the VRM avatar window
+    '--collect-all', 'faster_whisper',
+    '--collect-all', 'ctranslate2',     # faster-whisper's native inference engine
+    '--collect-all', 'av',              # faster-whisper's audio decoding
     '--hidden-import', 'pystray._win32',
     '--hidden-import', 'comtypes',
     '--paths', 'LIA',
@@ -49,12 +54,13 @@ if (-not (Test-Path (Join-Path $new 'Lia.exe'))) {
     throw "Build produced no Lia.exe -- the existing app is untouched"
 }
 
-# Voices and the avatar's renderer live beside the exe so you can drop in your
-# own without rebuilding.
-$voicesSrc = Join-Path $PSScriptRoot 'voices'
-if (Test-Path $voicesSrc) { Copy-Item $voicesSrc (Join-Path $new 'voices') -Recurse -Force }
-$vrmSrc = Join-Path $PSScriptRoot 'vrm'
-if (Test-Path $vrmSrc) { Copy-Item $vrmSrc (Join-Path $new 'vrm') -Recurse -Force }
+# Voices, the avatar's renderer, the tray/window icon source and your notes
+# folder all live beside the exe so you can drop in your own without
+# rebuilding.
+foreach ($folder in @('voices', 'vrm', 'assets', 'notes')) {
+    $src = Join-Path $PSScriptRoot $folder
+    if (Test-Path $src) { Copy-Item $src (Join-Path $new $folder) -Recurse -Force }
+}
 
 # Carry across whatever the live app already had (her log, the avatar
 # position). Nothing else persists -- there is no database.

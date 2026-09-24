@@ -1,6 +1,10 @@
-requests>=2.31         # every call to the hosted API (chat, speech-to-text)
+requests>=2.31         # talks to the local Ollama server (chat)
 numpy>=1.26
-python-dotenv>=1.0     # loads LIA/.env so the key needn't be a real env var (optional)
+python-dotenv>=1.0     # loads LIA/.env (optional; no key needed for a local model)
+
+# --- chat: a local model ---
+# Ollama itself is a separate install (ollama.com), not a pip package -- this
+# just needs its HTTP API to be reachable. See config.py's LOCAL_CHAT_MODEL.
 
 # --- voice: speaking ---
 # Local Piper only. There is no cloud voice and no SAPI fallback any more.
@@ -8,9 +12,10 @@ piper-tts>=1.6       # local neural TTS, uses the .onnx files in voices/
 sounddevice>=0.5     # audio playback + microphone capture
 
 # --- voice: listening ---
-# Transcription is a hosted API (OPENAI_TRANSCRIBE_MODEL). The only local
-# piece left is voice activity detection -- deciding when you have stopped
-# talking, which has to happen before any audio can be sent.
+# Transcription is local faster-whisper now (LOCAL_WHISPER_MODEL) -- no
+# hosted API. Voice activity detection (deciding when you have stopped
+# talking, before any audio is processed) stays a separate, much smaller model.
+faster-whisper>=1.0   # local speech-to-text (CTranslate2, CPU-friendly)
 pysilero-vad>=3.0     # voice activity detection for the open mic (onnx, no torch)
 
 # --- running as a background app ---

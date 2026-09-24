@@ -1,16 +1,18 @@
-"""The desktop avatar: Lia as a 3D VRM character, floating over your windows.
+"""The desktop avatar: Lia as a 3D VRM character, fixed in your screen's
+top-left corner.
 
 Replaces the old 2D sprite mascot with the format VTuber apps use. A tiny
 loopback HTTP server serves a single-page three.js viewer (three + three-vrm
 are vendored in vrm/vendor/, so this renders with no network); pywebview shows
-it in a frameless, transparent, always-on-top window. The model is the first
-*.vrm found in VRM_DIR.
+it in a frameless, transparent window. Not always-on-top: other windows can
+cover her, on purpose. The model is the first *.vrm found in VRM_DIR.
 
 It reflects one state -- idle / listening / thinking / speaking -- read every
 ~150ms from a callback the app hands in, exactly like mascot.py did. Blinking,
-breathing and idle sway are procedural; the mouth is driven by the real
-loudness of Piper's audio (see voice.set_audio_level_sink). Drag to move (the
-position is remembered); left-click toggles listening; right-click opens the
+breathing, idle sway and gaze wander are all procedural; the mouth is driven
+by the real loudness of Piper's audio (see voice.set_audio_level_sink). Drag
+to move within a session (her position is not remembered between runs -- she
+always starts top-left); left-click toggles listening; right-click opens the
 same menu the tray icon has.
 
 Drop any .vrm into LIA/vrm/ and restart. Preview the states without running
@@ -156,6 +158,14 @@ const renderer = new THREE.WebGLRenderer({
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(PIXEL_RATIO);
 renderer.setClearColor(0x000000, 0);
+// Three's default is flat: no tone mapping, and until r152 a color space that
+// undersaturated every texture. ACESFilmic is the closest a transparent
+// WebGL overlay gets to an "HDR" look on an ordinary SDR display -- richer
+// contrast and highlight rolloff instead of clipping -- since a layered,
+// color-keyed window can't actually negotiate real HDR output from Windows.
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 
 // What she is really rendering with, and whether the canvas is really
@@ -300,7 +310,10 @@ loader.load('/model.vrm', (gltf) => {
 
   // Frame her. Portrait fills the window with head and shoulders -- the face
   // is what reads from across a desk -- and works for any model height by
-  // anchoring on the head bone. Full shows the whole body.
+  // anchoring on the head bone. Full shows the whole body: a fixed camera
+  // position assumed one fixed model height and cut most models off, so this
+  // measures her actual bounding box instead and backs off far enough (at the
+  // window's own aspect ratio) to fit all of it, however tall she really is.
   if (FRAMING === 'portrait') {
     const head = vrm.humanoid && vrm.humanoid.getNormalizedBoneNode('head');
     const p = new THREE.Vector3(0, 1.4, 0);
@@ -308,8 +321,17 @@ loader.load('/model.vrm', (gltf) => {
     camera.position.set(p.x, p.y + 0.04, p.z + 0.85);
     camera.lookAt(p);
   } else {
-    camera.position.set(0, 1.35, 1.9);
-    camera.lookAt(0, 1.0, 0);
+    const box = new THREE.Box3().setFromObject(vrm.scene);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const aspect = camera.aspect || 1;
+    const vFov = camera.fov * Math.PI / 180;
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
+    const distV = (size.y / 2) / Math.tan(vFov / 2);
+    const distH = (size.x / 2) / Math.tan(hFov / 2);
+    const dist = Math.max(distV, distH) * 1.15 + size.z / 2;   // 15% headroom
+    camera.position.set(center.x, center.y, center.z + dist);
+    camera.lookAt(center);
   }
 
   if (window.pywebview && pywebview.api) pywebview.api.ready();
@@ -760,15 +782,25 @@ def apply_window_transparency(window) -> str:
         key = (240, 240, 240)
         notes.append("key #F0F0F0 (could not sample; WinForms default)")
 
-    # 3. the managed route: make the form paint and key the same color.
+    # 3. the managed route: make the form paint that color, but NOT via
+    #    form.TransparencyKey. WinForms' TransparencyKey installs its own
+    #    WM_NCHITTEST handling that treats every pixel matching the key as
+    #    click-through -- checked against the Form's own backing surface,
+    #    which stays the flat key color underneath a child WebView2 control
+    #    that paints on top of it. The result: the *entire* form becomes
+    #    click-through to Windows' hit-testing, no matter what WebView2 has
+    #    actually drawn there or whether the window is topmost -- which is
+    #    what made her impossible to click or drag no matter which of our
+    #    own click-through settings was in force. BackColor alone still
+    #    gives step 4's manual layered colorkey (below) the right color to
+    #    key on, without installing WinForms' own hit-test override.
     try:
         from System.Drawing import Color
 
         if form is not None:
             key_color = Color.FromArgb(255, key[0], key[1], key[2])
             form.BackColor = key_color
-            form.TransparencyKey = key_color
-            notes.append("form transparent-key set")
+            notes.append("form background-key set")
         else:
             notes.append("no native form to key")
     except Exception as exc:
@@ -781,10 +813,15 @@ def apply_window_transparency(window) -> str:
         try:
             user32 = ctypes.windll.user32
             GWL_EXSTYLE, WS_EX_LAYERED, LWA_COLORKEY = -20, 0x00080000, 0x1
+            # She is a floating character, not an app -- TOOLWINDOW drops her
+            # from the taskbar and alt-tab (APPWINDOW, if pywebview set it,
+            # would force her back on, so it comes off at the same time).
+            WS_EX_TOOLWINDOW, WS_EX_APPWINDOW = 0x00000080, 0x00040000
             style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-            if not style & WS_EX_LAYERED:
-                user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED)
-                notes.append("window made layered")
+            new_style = (style | WS_EX_LAYERED | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW
+            if new_style != style:
+                user32.SetWindowLongW(hwnd, GWL_EXSTYLE, new_style)
+                notes.append("window made layered, hidden from taskbar")
             colorref = key[0] | (key[1] << 8) | (key[2] << 16)
             user32.SetLayeredWindowAttributes(hwnd, colorref, 0, LWA_COLORKEY)
             notes.append("layered colour key applied")
@@ -1061,12 +1098,13 @@ def hit_test_report(window, mask: dict | None = None) -> list[str]:
 
 
 def _set_window_icon(window) -> str:
-    """Your icon on her window's taskbar and alt-tab entries.
+    """Your icon on her window's own handle.
 
-    pywebview's frameless window takes the generic Python icon from the exe;
-    the .ico you built with make_icon.py is pushed onto the HWND directly.
-    ICON_BIG drives the taskbar/alt-tab rendering, ICON_SMALL the title bar
-    (which a frameless window does not show, but Windows still asks for).
+    She is TOOLWINDOW (see apply_window_transparency), so this no longer
+    reaches a taskbar or alt-tab entry -- only the tray icon (make_icon.py,
+    via app.py) is visible day to day. Kept because Windows still asks a
+    window for WM_SETICON regardless, and a future non-toolwindow mode (a
+    debug window, say) would want it already wired.
     """
     try:
         from make_icon import ICO_PATH
@@ -1090,7 +1128,7 @@ def _set_window_icon(window) -> str:
     if small:
         user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, small)
     if big or small:
-        return "window icon: your assets/lia.ico on the taskbar and alt-tab"
+        return "window icon: your assets/lia.ico set on the window handle"
     return "window icon: could not load assets/lia.ico"
 
 
@@ -1176,6 +1214,20 @@ def transparency_report(window, shot: str | None = None,
     return "\n".join(lines)
 
 
+def _window_height(width: int) -> int:
+    """Her window's height for a given width.
+
+    Portrait crops to head-and-shoulders, so a truly square window is right.
+    Full-body framing puts a whole standing figure inside that same window,
+    which is why she came out tiny at a square size -- a person is roughly
+    twice as tall as wide, so full framing asks for a window in that
+    proportion instead.
+    """
+    if str(VRM_FRAMING).lower() == "full":
+        return int(width * 1.8)
+    return width
+
+
 def mask_debug(window) -> str:
     """The alpha mask as a picture, for when the shape comes out wrong."""
     try:
@@ -1232,10 +1284,15 @@ class VrmMascot:
             url=self._url,
             js_api=_Api(self),
             width=VRM_SIZE,
-            height=VRM_SIZE + 30,
+            height=_window_height(VRM_SIZE),
+            # pywebview defaults to a 200x100 floor (WinForms MinimumSize),
+            # which silently overrode any VRM_SIZE/VRM_MIN_SIZE below 200 --
+            # she was never actually as small as the config said. Tied to our
+            # own floor so "Smaller" can still reach it too.
+            min_size=(VRM_MIN_SIZE, VRM_MIN_SIZE),
             transparent=True,
             frameless=True,
-            on_top=True,
+            on_top=False,                  # she should not cover other windows
             easy_drag=False,               # drag is handled in JS (click vs drag)
             shadow=False,
         )
@@ -1250,36 +1307,21 @@ class VrmMascot:
         """Her window's current width, within the configured limits."""
         try:
             saved = json.loads(Path(VRM_POS_FILE).read_text())
-            return int(saved.get("w", VRM_SIZE))
+            return max(VRM_MIN_SIZE, min(VRM_MAX_SIZE, int(saved.get("w", VRM_SIZE))))
         except Exception:
             return VRM_SIZE
 
     def _place(self):
-        user32 = ctypes.windll.user32
-        sw, sh = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
-        # The work area is the screen minus the taskbar -- the part of the
-        # screen that is hers to live in, and the right thing to anchor a
-        # bottom-right default to and to clamp a stale saved position against.
-        class RECTC(ctypes.Structure):
-            _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
-                        ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
-
-        work = RECTC()
-        if user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(work)):  # SPI_GETWORKAREA
-            sw, sh = work.right - work.left, work.bottom - work.top
         size = self._size()
-        x, y = sw - size - VRM_MARGIN, sh - size - VRM_MARGIN   # bottom-right
+        height = _window_height(size)
+        # Fixed at the top-left, on purpose: not a default for when nothing
+        # is saved, but her one spot every launch. A dragged position is not
+        # read or written for x/y any more -- only her width still comes from
+        # VRM_POS_FILE (via _size), since "Bigger"/"Smaller" should still
+        # stick between runs even though where she sits does not.
+        x, y = VRM_MARGIN, VRM_MARGIN
         try:
-            saved = json.loads(Path(VRM_POS_FILE).read_text())
-            x, y = int(saved["x"]), int(saved["y"])
-        except Exception:
-            pass
-        # A saved position from a bigger window (or an older build) must not
-        # strand her off-screen.
-        x = max(0, min(x, sw - size))
-        y = max(0, min(y, sh - size))
-        try:
-            self.window.resize(size, size + 30)
+            self.window.resize(size, height)
             self.window.move(x, y)
         except Exception:
             pass
@@ -1299,7 +1341,7 @@ class VrmMascot:
         if size == self._size():
             return
         try:
-            self.window.resize(size, size + 30)
+            self.window.resize(size, _window_height(size))
             # The silhouette mask is in old-window coordinates; the region
             # must be rebuilt for the new frame or it clips the wrong shape.
             self._shape_ready.clear()
@@ -1313,8 +1355,8 @@ class VrmMascot:
     def _drag_by(self, dx: int, dy: int):
         try:
             self.window.move(self.window.x + dx, self.window.y + dy)
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[avatar: drag failed -- {type(exc).__name__}: {exc}]")
 
     def _mark_ready(self):
         self._ready.set()

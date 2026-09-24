@@ -1,0 +1,50 @@
+name: Build and release Lia.exe
+
+# Runs the same build_exe.ps1 a person would run locally, on GitHub's own
+# Windows runner (PyInstaller output is platform-specific -- a Windows exe
+# has to be built on Windows). A push of a "v*" tag (e.g. v1.0.0) publishes
+# the result as a downloadable GitHub Release; any other push or a manual
+# run just proves the build still works, with no release created.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write # only needed to create a Release on a tag push
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r LIA\requirements.txt
+          pip install pyinstaller
+
+      - name: Build Lia.exe
+        run: powershell -ExecutionPolicy Bypass -File LIA\build_exe.ps1
+
+      - name: Zip the build
+        run: Compress-Archive -Path dist\Lia\* -DestinationPath Lia-windows.zip
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lia-windows
+          path: Lia-windows.zip
+          retention-days: 30
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Lia-windows.zip
+          generate_release_notes: true

@@ -1,9 +1,11 @@
 """How often can she actually not reach the model?
 
-There is no local model to fall back to any more, so what CLOUD_FALLBACK_LOG
-records are the failures themselves: rate limits, dropped streams, empty
-replies. This script reads what it has recorded, so the choice of provider
-and model can be revisited from a week of real use instead of a guess.
+The model runs locally (Ollama) now, so there's no hosted-API outage to
+report on -- but Ollama can still be not running, or the model not pulled,
+or a stream can still drop mid-reply. What CLOUD_FALLBACK_LOG records are
+those failures. This script reads what it has recorded, so the choice of
+model and its settings can be revisited from a week of real use instead of a
+guess.
 
     python fallback_report.py            # last 7 days
     python fallback_report.py --days 30  # a longer window

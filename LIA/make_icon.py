@@ -23,7 +23,14 @@ import argparse
 import sys
 from pathlib import Path
 
-BASE_DIR = Path(__file__).parent
+# When packaged as an .exe, __file__ points inside a temporary unpack
+# directory that's deleted on exit -- same gotcha as config.py's BASE_DIR,
+# and the reason a packaged build reported "assets/lia.ico not built yet"
+# even though assets/ was copied right next to the real exe.
+if getattr(sys, "frozen", False):
+    BASE_DIR = Path(sys.executable).parent
+else:
+    BASE_DIR = Path(__file__).parent
 ASSETS_DIR = BASE_DIR / "assets"
 ICO_PATH = ASSETS_DIR / "lia.ico"
 

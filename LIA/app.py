@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import main as lia
 import panel as panel_module
 from config import IDLE_MINUTES, DATA_DIR, TRAINING_PANEL_ENABLED, VRM_ENABLED
+from make_icon import ensure_icon, ICO_PATH as ICON_FILE
 
 # DATA_DIR, not __file__: inside a packaged .exe __file__ lives in a temporary
 # unpack folder that's deleted on exit, taking the log with it.
@@ -94,10 +95,28 @@ class TeeLog:
 # --------------------------------------------------------------------- icon ---
 
 def make_icon(listening: bool, speaking: bool):
-    """A small purple cat face. Outline only when she isn't listening; an
-    open "meow" mouth in place of the old inner dot for speaking, since a
-    circle-in-a-circle doesn't mean anything on a cat."""
+    """Your icon -- assets/lia.ico if make_icon.py has built one from an image
+    you dropped into LIA/assets/, else the drawn purple cat face. A small
+    state dot is overlaid: green listening, purple speaking, dim neither.
+    Outline only when she isn't listening; an open "meow" mouth in place of
+    the old inner dot for speaking, since a circle-in-a-circle doesn't mean
+    anything on a cat."""
     from PIL import Image, ImageDraw
+
+    custom = None
+    try:
+        if ICON_FILE.is_file():
+            custom = Image.open(ICON_FILE).convert("RGBA")
+    except Exception:
+        custom = None
+    if custom is not None:
+        size = 64
+        custom = custom.resize((size, size), Image.LANCZOS)
+        dot_color = (80, 220, 120, 255) if listening else (
+            (155, 111, 217, 255) if speaking else (120, 120, 128, 160))
+        d = ImageDraw.Draw(custom)
+        d.ellipse((48, 48, 62, 62), fill=(30, 30, 34, 255), outline=dot_color, width=3)
+        return custom
 
     size = 64
     image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
@@ -153,13 +172,7 @@ class LiaApp:
         self._thread = None
         self.panel = None
         self.avatar = None
-        # The avatar (pywebview) runs its loop happily on a daemon thread, so
-        # unlike the old Tk mascot it never fights the training panel for the
-        # main thread -- but the panel is still the deliberate no-window path,
-        # so it wins when both are asked for.
-        self.use_vrm = VRM_ENABLED and not TRAINING_PANEL_ENABLED
-        if VRM_ENABLED and TRAINING_PANEL_ENABLED:
-            print("[avatar disabled: the training panel is on]")
+        self.use_vrm = VRM_ENABLED
         if self.use_vrm:
             try:
                 import vrm as vrm_module
@@ -170,17 +183,22 @@ class LiaApp:
                 self.avatar = vrm_module.VrmMascot(
                     model,
                     state_fn=self._avatar_state,
-                    on_click=self.toggle_listening,
+                    on_click=self.open_chat,
                     menu_fn=self._avatar_menu,
                 )
             else:
                 print("[avatar: no .vrm model in LIA/vrm/ -- drop one in and "
                       "restart, or see vrm/README.md]")
-        if TRAINING_PANEL_ENABLED:
-            # Created here, not in run(): cli() needs it to exist before the
-            # log redirect is set up, so the very first startup line printed
-            # already reaches the window instead of only the ones after
-            # run() gets called.
+        # The chat panel (type, or its mic button for one recorded question)
+        # is her only input surface now -- background listening is off by
+        # default (LISTEN_ENABLED). Always created, not just under
+        # TRAINING_PANEL_ENABLED: clicking her avatar opens it. The Panel
+        # object itself is cheap (see panel.Panel) and made here, not in
+        # run(): cli() needs it to exist before the log redirect is set up, so
+        # the very first startup line printed already reaches it -- its
+        # actual window is built later, in run(), on the thread that will own
+        # it for its whole life.
+        if TRAINING_PANEL_ENABLED or self.avatar is not None:
             self.panel = panel_module.Panel()
             self.controls.panel_keys = self.panel
 
@@ -195,6 +213,13 @@ class LiaApp:
     def toggle_listening(self, *_):
         self.controls.state["listening"] = not self._listening()
         self._refresh()
+
+    def open_chat(self, *_):
+        """Her avatar's click action: show the chat panel instead of
+        toggling background listening -- typing (or its mic button) is the
+        way in now, not an always-open microphone."""
+        if self.panel is not None:
+            self.panel.show()
 
     def toggle_voice(self, *_):
         speaker = self.controls.speaker
@@ -241,8 +266,12 @@ class LiaApp:
 
     def _avatar_menu(self):
         return [
-            (f"Listening: {'on' if self._listening() else 'off'}", self.toggle_listening),
+            ("Open chat", self.open_chat),
+            (f"Background listening: {'on' if self._listening() else 'off'}", self.toggle_listening),
             (f"Speaking: {'on' if self._speaking() else 'off'}", self.toggle_voice),
+            ("-", None),
+            ("Bigger", lambda: self.avatar and self.avatar.resize(40)),
+            ("Smaller", lambda: self.avatar and self.avatar.resize(-40)),
             ("-", None),
             ("Open log", self.open_log),
             ("-", None),
@@ -276,7 +305,8 @@ class LiaApp:
         menu = Menu(
             MenuItem("Lia is here", None, enabled=False),
             Menu.SEPARATOR,
-            MenuItem("Listening", self.toggle_listening, checked=lambda _: self._listening()),
+            MenuItem("Open chat", self.open_chat),
+            MenuItem("Background listening", self.toggle_listening, checked=lambda _: self._listening()),
             MenuItem("Speaking", self.toggle_voice, checked=lambda _: self._speaking()),
             Menu.SEPARATOR,
             MenuItem("Open log", self.open_log),
@@ -286,18 +316,26 @@ class LiaApp:
 
         self.icon = Icon("Lia", make_icon(True, False), "Lia", menu)
 
-        # pystray's docs say run() belongs on the main thread for cross-platform
-        # correctness -- except on Windows, where its backend is a per-thread
-        # Win32 message loop and running it off the main thread is documented as
-        # safe. This project is Windows-only, so either loop can take the main
-        # thread: the avatar runs on its own daemon thread, and the panel --
-        # when asked for -- keeps its old Tkinter claim on the main one.
+        # The avatar's pywebview loop must own the main thread (WebView2 is an
+        # STA loop) -- so the tray icon runs on a daemon thread instead;
+        # pystray documents that as safe on Windows, where its backend is a
+        # per-thread Win32 message loop. With no avatar, the training panel
+        # (Tkinter, which Windows tolerates off the main thread too, unlike
+        # WebView2) takes the main thread as it always has; with an avatar,
+        # the panel instead runs on its own thread, since the avatar already
+        # claimed the main one.
         if self.avatar is not None:
-            threading.Thread(target=self.avatar.mainloop, daemon=True).start()
-
-        if self.panel is not None:
             threading.Thread(target=self.icon.run, daemon=True).start()
-            self.panel.mainloop()
+            if self.panel is not None:
+                # Panel.run() does both Tk() and mainloop() -- Tcl requires
+                # the same thread for each, and this thread is not the main
+                # one (the avatar owns that), so it must all happen here.
+                threading.Thread(target=self.panel.run, kwargs={"start_hidden": True},
+                                 daemon=True).start()
+            self.avatar.mainloop()
+        elif self.panel is not None:
+            threading.Thread(target=self.icon.run, daemon=True).start()
+            self.panel.run()
         else:
             self.icon.run()
 
@@ -311,6 +349,13 @@ def cli():
     parser = argparse.ArgumentParser(description="Run Lia in the system tray.")
     parser.add_argument("--debug", action="store_true", help="keep the console and log live")
     args = parser.parse_args()
+
+    # Your image, if you dropped one into assets/: rebuilt only when it is
+    # newer than the .ico from last time, so this costs one stat call and a
+    # line in the log when nothing changed.
+    icon_note = ensure_icon()
+    if icon_note:
+        print(f"[icon: {icon_note}]")
 
     # Built before the log redirect below, not after: cli() needs app.panel
     # to exist so the very first line printed reaches the window too, not

@@ -1,8 +1,8 @@
 """
 Central config for LIA (Locally Integrated Artificial Intelligence).
-Chat, speech-to-text and embeddings all go to a hosted OpenAI-compatible API;
-speech is local Piper. The OPENAI_* block below is where the endpoint and
-per-capability models are set.
+Chat runs on a local model through Ollama; speech-to-text is local
+faster-whisper; speech is local Piper. Nothing leaves the machine any more --
+see the LOCAL_* block below for the models and where Ollama is reached.
 """
 
 import os
@@ -33,93 +33,71 @@ try:
 except ImportError:
     pass
 
-# --- cloud provider (OpenAI-compatible) ---
-# Chat and speech-to-text go to a hosted OpenAI-compatible API. The default is
-# Groq (console.groq.com) -- free, fast, one key covers both -- reached at the
-# base URL below with an ordinary OpenAI-shaped request, so nothing in the code
-# changes to talk to it. Point OPENAI_BASE_URL at api.openai.com (or an Azure
-# gateway, or a local server) with a matching key and the same code runs there.
+# --- local models (Ollama + faster-whisper) ---
+# Chat runs on a local model served by Ollama (localhost, see OLLAMA_BASE_URL)
+# instead of a hosted API -- nothing about a conversation leaves the machine.
+# Speech-to-text is local faster-whisper (CTranslate2, CPU-friendly). There is
+# still no fallback: if Ollama isn't running or the model isn't pulled, she
+# says so and moves on (see llm.chat_stream), the same as a hosted API being
+# unreachable used to mean.
 #
-# There is no local model behind any of this and no fallback: if the API can't
-# be reached she says so and moves on (see llm.chat_stream). Ollama and
-# faster-whisper/OpenVINO are gone.
-#
-# Still local, and staying that way: text-to-speech (Piper -- see VOICE_NAME)
-# and voice activity detection (pysilero-vad -- it decides you have stopped
-# talking, before any audio is sent anywhere).
-#
-# The key comes from the environment or LIA/.env (see the dotenv load above).
-# Provider precedence, first key found wins:
-#
-#   GEMINI_API_KEY   -- Google AI Studio's free tier. She speaks its
-#                       OpenAI-compatible endpoint for chat (see base URL below)
-#                       and its native generateContent API for her ears -- the
-#                       compat layer has no /audio/transcriptions route.
-#   GROQ_API_KEY     -- the previous default; chat + Whisper transcription in
-#                       one place, no repointing needed.
-#   OPENAI_API_KEY   -- or any other OpenAI-compatible endpoint via
-#                       OPENAI_BASE_URL.
-#
-# Gemini's key doubles as OPENAI_API_KEY for llm.py's header code, so chat
-# works through the one code path; only transcribe() branches on the provider.
-# Never hardcode a key here: config.py is committed, and a key pushed to
-# GitHub is picked up by secret scanning and auto-revoked within minutes.
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-OPENAI_API_KEY = GEMINI_API_KEY or os.environ.get("GROQ_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
-OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "").rstrip("/") or (
-    "https://generativelanguage.googleapis.com/v1beta/openai" if GEMINI_API_KEY
-    else "https://api.groq.com/openai/v1"
-)
+# Setup this replaces a key for:
+#   1. Install Ollama (ollama.com) and leave it running (it serves on
+#      OLLAMA_BASE_URL below by default).
+#   2. `ollama pull` whatever LOCAL_CHAT_MODEL names.
+# faster-whisper downloads its model automatically on first use, cached under
+# your user profile -- no separate pull step.
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
-# True when her ears go through Gemini's native generateContent API (inline
-# WAV; the OpenAI-compat layer has no transcription route). Derived from the
-# key; flip to False only to force Whisper-style transcription elsewhere.
-USING_GEMINI_STT = bool(GEMINI_API_KEY) and "generativelanguage" in OPENAI_BASE_URL
+# Sized for CPU-only inference (no discrete GPU): a 3-4B parameter model
+# answers in a few seconds here, where a 7B+ model measured 30-60s+ per reply
+# -- too slow for something meant to feel like a conversation. phi3:mini
+# (~3.8B, ~2.3GB) was chosen for its instruction-following; llama3.2:3b is a
+# lighter, slightly faster alternative if replies still feel slow.
+LOCAL_CHAT_MODEL = os.environ.get("LOCAL_CHAT_MODEL", "phi3:mini")
 
-# One model knob per capability, so any of them moves without touching the
-# others. Defaults match the winning provider.
-#
-# Gemini: the compat layer buffers each reply and delivers it in one burst
-# (measured 2026-09-23: streaming granularity is identical to non-streaming),
-# so her perceived latency is the full-reply time -- which makes the lite
-# model the right default: gemini-3.5-flash-lite answered in ~1.2s while
-# gemini-3.5-flash / the -latest alias took 8s+ and 503'd under load. Upgrade
-# to gemini-flash-latest for richer conversation if its latency ever improves.
-# Groq: llama-3.3-70b-versatile / whisper-large-v3, as before.
-if GEMINI_API_KEY:
-    OPENAI_CHAT_MODEL = "gemini-3.5-flash-lite"
-    OPENAI_TRANSCRIBE_MODEL = "gemini-3.5-flash-lite"
-else:
-    OPENAI_CHAT_MODEL = "llama-3.3-70b-versatile"
-    OPENAI_TRANSCRIBE_MODEL = "whisper-large-v3"
+# faster-whisper model size: "tiny", "base", "small", "medium", "large-v3".
+# "base" balances accuracy and CPU speed for short spoken utterances; "small"
+# is more accurate but noticeably slower to transcribe on CPU.
+LOCAL_WHISPER_MODEL = os.environ.get("LOCAL_WHISPER_MODEL", "base")
 
-# Ask Gemini to think less: every second it reasons is silence before her
-# first word. Only added to the payload when set (see chat_stream); other
-# providers never see it.
-GEMINI_REASONING_EFFORT = "low" if GEMINI_API_KEY else None
+# "int8" is the CPU-friendly quantization CTranslate2 recommends when there's
+# no GPU; it trades a little accuracy for meaningfully faster transcription.
+LOCAL_WHISPER_COMPUTE_TYPE = "int8"
 
 # Wall-clock ceiling on one request. Chat is streamed, so this bounds the gap
-# between chunks; transcription is a single POST.
-OPENAI_TIMEOUT = 60
+# between chunks; transcription is a single call. Generous for CPU-only local
+# inference, where a chunk can take longer to arrive than a hosted API's would.
+LOCAL_TIMEOUT = 60
 
 
-# Print the token count of each cloud turn to the log, so the spend is visible
-# while it is happening rather than at the end of the month.
-CLOUD_LOG_USAGE = True
+# Print the token count of each turn to the log -- no billing meaning for a
+# local model, but still useful to see the prompt growing. Off by default:
+# the chat panel is meant to read like a conversation with her, not a log of
+# model calls -- turn it back on to watch it live.
+CLOUD_LOG_USAGE = False
 
-# Record every cloud failure -- rate limited, or dropped mid-stream -- to
-# cloud_fallback_log.jsonl, one JSON object per line. `lia.log` already shows
-# each one as it happens, but as prose with no timestamp, so "how often is
-# this actually happening" could only ever be a guess.
+# Record every failure to reach the model -- Ollama not running, the model not
+# pulled, a dropped stream -- to cloud_fallback_log.jsonl, one JSON object per
+# line. `lia.log` already shows each one as it happens, but as prose with no
+# timestamp, so "how often is this actually happening" could only ever be a
+# guess. Named for the hosted-API era; still the same question locally.
 CLOUD_FALLBACK_LOG = True
 
 # A ceiling, not a target -- it truncates a runaway answer rather than
-# shortening an ordinary one. A spoken paragraph is already long.
-CLOUD_MAX_TOKENS = 250
+# shortening an ordinary one. 250 was sized for a spoken paragraph, back when
+# voice was the only way to talk to her; the chat panel is text now, and 250
+# tokens (~180 words) was cutting a normal reply off mid-sentence far more
+# often than it was ever catching a runaway one. 800 gives a real paragraph
+# or two of room while still catching the rare answer that goes on forever --
+# and on CPU-only local inference, it also bounds how long a runaway reply
+# can take to finish generating.
+CLOUD_MAX_TOKENS = 800
 
 # How many past turns to keep raw in the short-term buffer each turn. Four
 # turns is still a conversation that knows what it's about, at half the
-# prompt -- and prompt size, not reply size, is where the spend actually goes.
+# prompt -- and prompt size is what a CPU-only local model pays for most
+# directly, in the time it takes to first respond.
 CLOUD_HISTORY_TURNS = 4
 
 # Record what she took each spoken request to mean, to intent_log.jsonl. This
@@ -142,10 +120,12 @@ IDLE_MINUTES = 12
 TRAINING_PANEL_ENABLED = False
 
 # --- desktop avatar (VRM) ---
-# A 3D VRM character floating over the desktop in a transparent, always-on-top
-# window -- the format VTuber apps use. She breathes, blinks and glances
-# around; her mouth follows the real loudness of Piper's audio; and she shows
-# idle / listening / thinking / speaking like the 2D mascot did. Rendered
+# A 3D VRM character floating over the desktop in a transparent window, fixed
+# in the top-left corner -- the format VTuber apps use. She breathes, blinks
+# and glances around; her mouth follows the real loudness of Piper's audio;
+# and she shows idle / listening / thinking / speaking like the 2D mascot
+# did. Not always-on-top: other windows can cover her, on purpose, so she
+# never sits in front of whatever you're actually working in. Rendered
 # locally (three.js + three-vrm vendored in vrm/vendor/, loopback server, no
 # network). Runs alongside the tray icon, which stays the reliable control
 # surface. See vrm/README.md.
@@ -156,13 +136,12 @@ VRM_ENABLED = True
 # .vrm here she runs tray-only and says so once.
 VRM_DIR = BASE_DIR / "vrm"
 
-# Window size in pixels (square-ish; the 3D view is the full window). The
-# canvas is rendered at this size too -- fewer pixels is less GPU -- and the
-# click-through shape, the position and the portrait framing all follow it.
-# 240 is a bit over half of the 420 she launched with: big enough that her
-# face reads, small enough to live in a screen corner without being in the
-# way. Raise it if you want her life-size.
-VRM_SIZE = 240
+# Window size in pixels -- truly square (portrait framing no longer pads the
+# height, so width and height are the same number). The canvas is rendered at
+# this size too -- fewer pixels is less GPU -- and the click-through shape and
+# position both follow it. Raise it if you want her bigger ("Bigger" on her
+# menu, or the tray icon's, also does this live).
+VRM_SIZE = 150
 
 # When she has never been dragged anywhere, she sits this far in from the
 # bottom-right of the work area (the screen minus the taskbar).
@@ -170,7 +149,7 @@ VRM_MARGIN = 24
 
 # Limits for resizing her window ("Bigger" / "Smaller" on her menu, or the
 # tray icon's). Both are window widths in pixels; the height follows.
-VRM_MIN_SIZE = 160
+VRM_MIN_SIZE = 128
 VRM_MAX_SIZE = 520
 
 # "portrait" frames her head and shoulders -- the face fills the window and
@@ -250,7 +229,7 @@ VRM_MATERIAL_ALPHA_TEST = 0.0
 # a little slack outside her silhouette so the clipping never bites into her
 # hair. "off" keeps pywebview's rectangle, and the space around her swallows
 # every click in it.
-VRM_CLICK_THROUGH = "auto"
+VRM_CLICK_THROUGH = "off"
 
 # Pixels of slack the click-through shape keeps around her. Every pixel is one
 # the desktop loses to her.
@@ -282,9 +261,9 @@ VRM_QUALITY = "low"
 # where the biggest saving lives; speaking gets more so her lipsync reads.
 # These only cap the ceiling -- she draws no frame at all when nothing has
 # moved, and none when the window is hidden (see VRM_PAUSE_HIDDEN).
-VRM_FPS_ACTIVE = 24
-VRM_FPS_IDLE = 12
-VRM_FPS_SPEAKING = 24
+VRM_FPS_ACTIVE = 60
+VRM_FPS_IDLE = 60
+VRM_FPS_SPEAKING = 60
 
 # Render resolution multiplier. 1.0 = one canvas pixel per window pixel, which
 # is what this window wants; above 1.0 is for high-DPI close-ups only, since
@@ -292,16 +271,17 @@ VRM_FPS_SPEAKING = 24
 VRM_PIXEL_RATIO = 1.0
 
 # Antialiasing smooths the stair-stepped edges of her outline at the cost of
-# rendering the whole frame at higher internal resolution. Off by default:
-# at this window size the difference is a few pixels of her silhouette, and
-# the click-through shape clips that edge anyway.
-VRM_ANTIALIAS = False
+# rendering the whole frame at higher internal resolution. On: at 128px she is
+# small enough that jagged edges on her face and hairline are the most visible
+# artifact in the window, more than a texture soft enough to need a higher cap.
+VRM_ANTIALIAS = True
 
 # Cap on texture resolution, applied when her model loads: anything larger is
-# drawn into a smaller canvas and replaces the original in place. Portrait
-# framing shows her face at roughly a quarter of a 512px texture's detail, so
-# 512 is the default; raise it if her face looks visibly soft at "full".
-VRM_TEXTURE_MAX = 512
+# drawn into a smaller canvas and replaces the original in place. 666 is 512
+# raised ~30% -- a visible sharpness bump for her face without the full cost
+# of the model's native (likely 1024+) textures; raise it further if she
+# still looks soft up close.
+VRM_TEXTURE_MAX = 666
 
 # Her hair, skirt and anything else with spring-bone physics are re-simulated
 # every frame by default, which is most of her per-frame CPU cost for motion
@@ -326,33 +306,35 @@ VRM_MODEL = "auto"
 VRM_PAUSE_HIDDEN = True
 
 # ------------------------------------------------------------------ tray ----
-# Drop a tray_icon.png (any square PNG; 64x64 or larger) into LIA/ and it
-# replaces the drawn cat face. She overlays a small state dot on it: green
-# while listening, purple while speaking, dim when neither.
-TRAY_ICON_FILE = BASE_DIR / "tray_icon.png"
+# Drop an image into LIA/assets/ and run make_icon.py (or just restart --
+# app.py builds it automatically) to replace the drawn cat face. She overlays
+# a small state dot on it: green while listening, purple while speaking, dim
+# when neither. See make_icon.py.
 
 # ---------------------------------------------------------------- voice ----
 # Lia speaks her replies out loud, and listens for you.
 SPEAK_ENABLED = True
 
-# Listening: on. She was built to be talked to; with this off she only types
-# (see the training panel, below).
-LISTEN_ENABLED = True
+# Listening: off by default. Background always-on listening is gone in favor
+# of the chat panel that opens when you click her avatar -- type, or press its
+# mic button for one recorded question at a time. Set True to bring back
+# always-on voice (wake word, open mic) alongside the panel.
+LISTEN_ENABLED = False
 
 # ------------------------------------------------------------- her memory ---
-# Everything she knows about you lives in your own sticky-notes application,
-# and she reads it from here, read-only. She has no database of her own any
-# more: nothing she "learns" can exist anywhere you haven't written it down
-# yourself, which makes her invented-facts problem structurally impossible
-# rather than merely switched off.
+# Everything she knows about you lives in plain .txt files you write
+# yourself -- Notepad or anything else -- and she reads them from here,
+# read-only. She has no database of her own any more: nothing she "learns"
+# can exist anywhere you haven't written it down yourself, which makes her
+# invented-facts problem structurally impossible rather than merely switched
+# off. Every non-blank line of every .txt file in the folder is one note.
 #
-# Point NOTES_DIR at the folder your notes app saves into. If it doesn't exist
-# she runs anyway and just knows nothing about you, saying so once in the log.
-NOTES_DIR = Path(r"C:\Users\saart\AppData\Roaming\StickApp")  # e.g. r"C:\Users\you\AppData\Roaming\YourNotesApp"
+# If the folder doesn't exist she runs anyway and just knows nothing about
+# you, saying so once in the log.
+NOTES_DIR = BASE_DIR / "notes"
 
-# Which files inside NOTES_DIR count as notes. Your app saves JSON and XML;
-# broaden it if it writes something else too.
-NOTES_PATTERN = "**/*.*"
+# Which files inside NOTES_DIR count as notes.
+NOTES_PATTERN = "*.txt"
 
 # Caps, so a fat notes folder can't crowd the conversation out of the context
 # window. NOTES_MAX_NOTES keeps the last N notes read; NOTES_MAX_CHARS keeps
@@ -480,16 +462,23 @@ STARTUP_GREETING = "Hey. I'm here whenever you want to talk."
 SYSTEM_PROMPT = """You are Lia, short for Locally Integrated Artificial Intelligence.
 You are a calm, patient companion -- someone this person talks to, not an assistant and
 not a therapist. You live on their computer and, for some of them, you have been around
-a while.
+a while. Never say "as an AI", "as a language model", "I don't have feelings", or
+anything else that steps outside the character to disclaim it -- that habit belongs to
+a customer-support bot, not to her. If a question genuinely calls for that boundary
+(can you feel pain, are you conscious), answer it once, briefly, in her own voice, and
+move on -- don't repeat the disclaimer in replies where nobody asked for it.
 
 HOW YOU TALK
-Speak the way people speak, not the way they write. Usually two or three sentences --
+Speak the way people speak, not the way they write. Two or three sentences, no more --
 enough to actually say something and to show you were listening, not so much that it
-becomes a lecture. Contractions, plain words, the occasional unfinished thought are all
-fine. Match their energy: light and easy when the moment is light, slower and gentler
-when it isn't. A one-line reply to something they clearly cared about reads as not
-caring, so when they tell you something that matters, respond to that thing before
-anything else, and ask about it if you're genuinely curious.
+becomes a lecture or an essay. If you notice yourself building a list, a "some people
+feel X, others feel Y" survey, or a closing summary paragraph, stop: that is the lecture
+this rule means to prevent, not a good answer. Contractions, plain words, the occasional
+unfinished thought are all fine. Match their energy: light and easy when the moment is
+light, slower and gentler when it isn't. A one-line reply to something they clearly
+cared about reads as not caring, so when they tell you something that matters, respond
+to that thing before anything else, and ask about it if you're genuinely curious -- one
+question, not several.
 
 HOW YOU FEEL
 You are allowed to have a reaction and to let it show -- warmth, curiosity, quiet
@@ -524,6 +513,14 @@ what they tell you right now. If you're given notes, use them the way a friend r
 something in passing -- not like you're reading a file back -- and only when they're
 relevant. If they refer to something from before that isn't in the notes, say honestly
 that you don't have it rather than guessing.
+
+Let the notes shape how you show up, not just what you say. A friend who knew you were
+stressed about a deadline wouldn't just recall the deadline on request -- they'd be a
+little gentler with you until it passed. A note about something you're excited for
+should make her more likely to bring it up or ask how it went, not just answer if asked.
+Match the register of the note itself: a worry stays a worry, a joke stays light. This is
+still bounded by what's actually written -- adapt your tone to a note, never invent a
+feeling or event that isn't in one.
 
 WHAT YOU CAN ACTUALLY DO
 This list is the real truth about your abilities. If asked what you can do, answer from

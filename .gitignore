@@ -15,6 +15,7 @@ __pycache__/
 
 # Logs.
 *.log
+cloud_fallback_log.jsonl
 
 # Downloadable models -- large binaries, re-fetched via LIA/models/README.md
 # and LIA/voices/README.md rather than committed.
@@ -28,16 +29,28 @@ LIA/models/*.onnx
 LIA/voices/*.onnx
 
 # Anything you've handed her. Documents you drop in the library are yours (and
-# often someone else's copyright); music likewise. Only the READMEs explaining
-# what the folders are for belong in the repo.
+# often someone else's copyright); music likewise; her notes are personal.
+# Only the READMEs explaining what the folders are for belong in the repo.
 LIA/library/*
 !LIA/library/README.md
 LIA/music/*
 !LIA/music/README.md
+LIA/notes/*
+!LIA/notes/README.md
 
-# API keys, if you ever put one in a file instead of an environment variable.
+# Desktop avatar art -- yours to add, and often someone else's character.
+# Only the README and the vendored three.js/three-vrm viewer belong in the repo.
+LIA/vrm/*
+!LIA/vrm/README.md
+!LIA/vrm/vendor/
+# Where the avatar's dragged position is remembered.
+vrm_pos.json
+
+# API keys. Put yours in LIA/.env -- never in config.py, which is committed.
 .env
 .env.*
+!.env.example
+!LIA/.env.example
 
 # plain-text conversions of library documents, regenerated on demand
 extracted/
@@ -61,3 +74,8 @@ LIA/models/openvino/
 # specific to this exact CPU, driver version and OpenVINO build -- so it is
 # not merely large (~360MB), it is actively wrong on any other machine.
 ov_cache/
+
+# Not project source -- local tool state and an ad-hoc screenshot that ended
+# up in the repo root.
+.freebuff/
+fix1_window.png

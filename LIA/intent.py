@@ -95,7 +95,7 @@ _WORD = re.compile(r"[a-z]+")
 # without ever saying so. It measured 30/32 on llama3.2:3b and 0/n here.
 #
 # A named-choice completion needs nothing from the template, so it works on
-# whatever OPENAI_CHAT_MODEL happens to be -- which is the property this layer
+# whatever LOCAL_CHAT_MODEL happens to be -- which is the property this layer
 # actually wants, given it exists to be a safety net.
 ACTIONS = {
     "mic_off": "Stop listening entirely until they start you again.",

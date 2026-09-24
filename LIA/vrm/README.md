@@ -1,9 +1,10 @@
 # Lia's 3D avatar
 
-A floating, always-on-top **VRM character** — the format VTuber apps use — that
-shows what Lia is doing: idle, listening, thinking, speaking. Rendered locally
-with three.js + `@pixiv/three-vrm` (vendored in `vendor/`, MIT, no network
-needed) inside a transparent pywebview/WebView2 window.
+A floating **VRM character** — the format VTuber apps use — fixed in your
+screen's top-left corner, that shows what Lia is doing: idle, listening,
+thinking, speaking. Rendered locally with three.js + `@pixiv/three-vrm`
+(vendored in `vendor/`, MIT, no network needed) inside a transparent
+pywebview/WebView2 window. Not always-on-top: other windows can cover her.
 
 ## Give her a model
 
@@ -23,7 +24,8 @@ With no `.vrm` here she runs tray-only and prints one hint pointing here.
 | thinking | gaze up-left, tilted head, eyes mostly closed |
 | speaking | mouth follows the **actual loudness** of Piper's audio + subtle bob |
 
-- **Drag** anywhere to move her (position is remembered in `vrm_pos.json`).
+- **Drag** anywhere to move her within the session; she starts top-left again
+  next time you run her.
 - **Left-click** toggles listening.
 - **Right-click** opens the same menu as the tray icon.
 
@@ -42,8 +44,17 @@ is "speaking")
 |---|---|
 | `VRM_ENABLED` | `False` runs tray-only even with a model present |
 | `VRM_DIR` | where the `.vrm` files live (this folder) |
-| `VRM_SIZE` | window size in pixels (420 default) |
-| `VRM_POS_FILE` | where the dragged position is remembered |
+| `VRM_SIZE` | window size in pixels (128 default) |
+| `VRM_FRAMING` | `portrait` (head-and-shoulders close-up, default) or `full` (whole body) |
+| `VRM_FORCE_SOFTWARE_RENDER` | force WebView2 software rendering — restores transparency on machines where the hardware compositor drops it (opaque-rectangle fix); set `False` on a GPU machine |
+| `VRM_MARGIN` | pixels in from the top-left corner she's fixed to |
+
+## The tray icon
+
+Drop an image into `LIA/assets/` and restart (or run `python LIA\make_icon.py`)
+and it replaces the drawn cat face; she overlays a small state dot (green
+listening, purple speaking). Delete the image and rebuild to go back to the
+drawn one. See `assets/README.md`.
 
 ## Notes & limits
 
