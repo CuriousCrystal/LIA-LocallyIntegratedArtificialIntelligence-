@@ -229,7 +229,7 @@ VRM_MATERIAL_ALPHA_TEST = 0.0
 # a little slack outside her silhouette so the clipping never bites into her
 # hair. "off" keeps pywebview's rectangle, and the space around her swallows
 # every click in it.
-VRM_CLICK_THROUGH = "off"
+VRM_CLICK_THROUGH = "auto"
 
 # Pixels of slack the click-through shape keeps around her. Every pixel is one
 # the desktop loses to her.

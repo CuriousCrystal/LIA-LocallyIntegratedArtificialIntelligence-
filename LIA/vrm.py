@@ -565,7 +565,15 @@ def _render_page() -> bytes:
 # modules use between themselves (GLTFLoader asks for ../utils/..., which the
 # browser resolves against /vendor/ to just /utils/...).
 def _vendor_urls() -> dict:
-    root = Path(__file__).parent / "vrm" / "vendor"
+    # VRM_DIR, not Path(__file__).parent / "vrm": __file__ points inside
+    # PyInstaller's temporary unpack directory in a packaged exe (same
+    # gotcha as config.py's BASE_DIR/DATA_DIR and make_icon.py's BASE_DIR),
+    # where vendor/ was never actually copied -- the vendored three.js
+    # module import 404'd, window.__lia never got created, and every
+    # evaluate_js call after that failed silently (see _log_renderer's
+    # broad except), which is why the packaged app.exe showed no avatar at
+    # all with no visible error.
+    root = VRM_DIR / "vendor"
     out = {}
     for rel, mime in _VENDOR.items():
         out[f"/vendor/{rel}"] = (root / rel, mime)
