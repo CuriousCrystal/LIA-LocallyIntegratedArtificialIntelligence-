@@ -160,6 +160,67 @@ VRM_DIR = BASE_DIR / "vrm"
 # frames a full-body model comfortably; raise it if you want her life-size.
 VRM_SIZE = 420
 
+# "portrait" frames her head and shoulders -- the face fills the window and
+# reads from across the desk. "full" shows the whole body, which suits a
+# chibi-style model or a big window.
+VRM_FRAMING = "portrait"
+
+# Ask WebView2 to render in software ("--disable-gpu") instead of using the
+# machine's GPU.
+#
+# Off, and it should stay off on anything with working 3D -- an integrated
+# Intel or AMD graphics chip counts. Software rendering puts every frame of the
+# character on the CPU, and it does not buy transparency: measured on this
+# machine (Intel iGPU, no discrete card) the opaque background survived
+# "--disable-gpu" completely. Worse, it may never have been applied at all --
+# pywebview sets its own AdditionalBrowserArguments when it builds the WebView2
+# environment, and that wins over this environment variable, which is why the
+# ~90% GPU use below was still there while software rendering was supposedly
+# forced. She logs the WebGL renderer she actually got at startup; "SwiftShader"
+# in that line means software. Measure with vrm_bench.py rather than trusting
+# either flag.
+VRM_FORCE_SOFTWARE_RENDER = False
+
+# How the window behind her is made see-through.
+#
+# Nothing in the web layer needs this: the page, the canvas and the three.js
+# renderer are all transparent already. The rectangle comes from the Win32
+# window underneath, where exactly two things can paint behind her:
+#
+#   * WebView2's own default background, which is opaque white. pywebview sets
+#     it to Transparent, but only *before* the browser is initialized -- and
+#     some WebView2 versions ignore that, leaving the white default in force.
+#   * the WinForms form's background color (#F0F0F0), which is what you see
+#     through the browser once its background is transparent. pywebview never
+#     clears it: its whole transparency story is two lines, and neither makes
+#     the window layered or touches the form's own BackColor.
+#
+# "auto" (default) fixes both and checks its own work: the WebView2 background
+# is re-asserted once the browser exists, and the window is made a layered
+# window keyed on the color actually painted behind her. A color key is binary
+# per pixel, so its one cost is that her anti-aliased edges blend toward that
+# color instead of toward the desktop -- a faint light rim where the rectangle
+# used to be. VRM_MATERIAL_ALPHA_TEST below is the knob for that.
+# "off" leaves the window exactly as pywebview made it (diagnostics only).
+VRM_TRANSPARENCY = "auto"
+
+# Which color the transparent key uses. "auto" reads the color that is really
+# painted behind her at runtime, so the key always matches -- no guessing at
+# the system theme. Set an explicit hex (e.g. "#FF00FF", magenta) only if the
+# automatic key is eating part of the model, since it removes every pixel of
+# that exact color; a model with near-white shading in it is the case where
+# that happens.
+VRM_COLOR_KEY = "auto"
+
+# alphaTest forced onto her materials; 0 leaves them exactly as the model
+# author set them. This is the knob for the other half of edge artifacts: hair
+# built from alpha-textured cards has pixels that are almost-but-not-quite
+# transparent, and those blend into a pale halo against whatever is behind
+# her. Raising this (0.02 to 0.2) discards them instead of blending them. Too
+# high and thin strands of hair start to disappear, which is why 0 is the
+# default: turn it up only if you can see the halo.
+VRM_MATERIAL_ALPHA_TEST = 0.0
+
 # One accepted limitation of the transparent WebView2 window: clicks on
 # transparent pixels still land on her window, so the rectangle in front of
 # her is hers. She is small; the desktop around her is not.

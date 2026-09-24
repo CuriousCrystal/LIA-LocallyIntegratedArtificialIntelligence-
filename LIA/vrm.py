@@ -17,10 +17,20 @@ Drop any .vrm into LIA/vrm/ and restart. Preview the states without running
 her:
 
     python LIA\\vrm.py          cycles through the states
+
+And check that the window is really transparent rather than trusting the
+flags -- the pixels along the inside of her window's edges are compared with
+the desktop just outside them, which stays valid even if what is behind her is
+moving:
+
+    python LIA\\vrm.py --check                 prints the verdict
+    python LIA\\vrm.py --check --shot her.png  also saves the photo
 """
 
 import ctypes
 import json
+import os
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -28,7 +38,20 @@ from pathlib import Path
 
 import webview
 
-from config import VRM_DIR, VRM_SIZE, VRM_POS_FILE
+from config import (
+    VRM_DIR, VRM_SIZE, VRM_POS_FILE, VRM_FRAMING, VRM_FORCE_SOFTWARE_RENDER,
+    VRM_TRANSPARENCY, VRM_COLOR_KEY, VRM_MATERIAL_ALPHA_TEST,
+)
+
+# Best effort, and only that: WebView2 reads this when it creates the browser
+# process, but pywebview passes its own AdditionalBrowserArguments when it
+# builds the WebView2 environment and that takes precedence -- so on this
+# version the flag can be ignored entirely. It is no longer the way the opaque
+# background gets fixed (see apply_window_transparency); the startup line that
+# reports the WebGL renderer in use is the only trustworthy answer to whether
+# software rendering is actually in force.
+if VRM_FORCE_SOFTWARE_RENDER:
+    os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = "--disable-gpu"
 
 _STATES = ("idle", "listening", "thinking", "speaking")
 _VENDOR = {
@@ -63,8 +86,13 @@ _PAGE = """<!doctype html>
 <meta charset="utf-8">
 <title>Lia</title>
 <style>
-  html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
-  canvas { display: block; }
+  /* All of this is load-bearing for the transparent window: any background
+     color, border, shadow or outline set here paints itself into the middle of
+     her rectangle, and a perfectly transparent 3D scene cannot hide it. */
+  html, body { margin: 0; padding: 0; background: transparent !important;
+               border: none; outline: none; overflow: hidden; }
+  canvas { display: block; background: transparent !important;
+           border: none; outline: none; box-shadow: none; }
   #menu { position: fixed; display: none; background: rgba(28,26,32,0.95);
           color: #eee; border-radius: 8px; padding: 4px; min-width: 150px;
           font: 13px 'Segoe UI', sans-serif; user-select: none; z-index: 10; }
@@ -91,19 +119,47 @@ import * as THREE from 'three';
 import { GLTFLoader } from '/vendor/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '/vendor/three-vrm.module.js';
 
+const FRAMING = '__FRAMING__';   // injected by the server: portrait | full
+
 let state = 'idle';
 let mouth = 0;                    // latest level from Python, 0..1
 let mouthOpen = 0;                // smoothed toward mouth each frame
 
 const scene = new THREE.Scene();
+// Never a scene background, and no fog: either one would paint an opaque
+// rectangle behind her inside a window that is supposed to show the desktop.
+scene.background = null;
 const camera = new THREE.PerspectiveCamera(22, innerWidth / innerHeight, 0.1, 20);
-camera.position.set(0, 1.35, 1.9);
 
-const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+// alpha + premultipliedAlpha: the canvas has to carry an alpha channel itself
+// and hand it to the compositor in premultiplied form, which is what the
+// window is made of. setClearColor(0x000000, 0) is the cleared background.
+const renderer = new THREE.WebGLRenderer({
+  alpha: true, premultipliedAlpha: true, antialias: true,
+});
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setClearColor(0x000000, 0);
 document.body.appendChild(renderer.domElement);
+
+// What she is really rendering with, and whether the canvas is really
+// transparent -- the two questions a screenshot cannot answer, readable from
+// Python over the js bridge. "SwiftShader" here means every frame is being
+// drawn on the CPU, whatever the config says it asked for.
+const _gl = renderer.getContext();
+const _dbg = _gl.getExtension('WEBGL_debug_renderer_info');
+const _rendererName = _dbg ? _gl.getParameter(_dbg.UNMASKED_RENDERER_WEBGL)
+                           : _gl.getParameter(_gl.RENDERER);
+let _probe = null;
+function probePixels() {
+  const w = _gl.drawingBufferWidth, h = _gl.drawingBufferHeight;
+  const buf = new Uint8Array(4);
+  const at = (x, y) => {
+    _gl.readPixels(x, y, 1, 1, _gl.RGBA, _gl.UNSIGNED_BYTE, buf);
+    return [buf[0], buf[1], buf[2], buf[3]];
+  };
+  return { size: [w, h], corner: at(2, h - 3), centre: at((w / 2) | 0, (h / 2) | 0) };
+}
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
@@ -122,13 +178,42 @@ scene.add(gaze);
 let vrm = null;
 const loader = new GLTFLoader();
 loader.register((parser) => new VRMLoaderPlugin(parser));
+// Hair and lashes are often alpha-textured cards, and pixels that are almost
+// but not quite transparent blend into a pale halo against whatever is behind
+// her. alphaTest discards them instead of blending them. 0 leaves the model's
+// own material settings alone, which is the default -- see VRM_MATERIAL_ALPHA_TEST.
+function applyAlphaTest(root) {
+  if (!(__ALPHA_TEST__ > 0)) return;
+  root.traverse((o) => {
+    if (!o.material) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    for (const m of mats) { m.alphaTest = __ALPHA_TEST__; m.needsUpdate = true; }
+  });
+}
+
 loader.load('/model.vrm', (gltf) => {
   vrm = gltf.userData.vrm;
   VRMUtils.removeUnnecessaryVertices(gltf.scene);
   VRMUtils.combineSkeletons(gltf.scene);
   vrm.scene.traverse((o) => { o.frustumCulled = false; });
   VRMUtils.rotateVRM0(vrm);        // VRM 0.x models face away otherwise
+  applyAlphaTest(vrm.scene);
   scene.add(vrm.scene);
+
+  // Frame her. Portrait fills the window with head and shoulders -- the face
+  // is what reads from across a desk -- and works for any model height by
+  // anchoring on the head bone. Full shows the whole body.
+  if (FRAMING === 'portrait') {
+    const head = vrm.humanoid && vrm.humanoid.getNormalizedBoneNode('head');
+    const p = new THREE.Vector3(0, 1.4, 0);
+    if (head) head.getWorldPosition(p);
+    camera.position.set(p.x, p.y + 0.04, p.z + 0.85);
+    camera.lookAt(p);
+  } else {
+    camera.position.set(0, 1.35, 1.9);
+    camera.lookAt(0, 1.0, 0);
+  }
+
   if (window.pywebview && pywebview.api) pywebview.api.ready();
 }, undefined, () => {
   if (window.pywebview && pywebview.api) pywebview.api.ready();
@@ -138,7 +223,13 @@ window.setLevel = (v) => { mouth = Math.max(0, Math.min(1, v)); };
 const _STATES = ['idle', 'listening', 'thinking', 'speaking'];
 window.setState = (s) => { if (_STATES.includes(s)) state = s; };
 // readback for diagnostics / the self-test (module vars aren't on window)
-window.__lia = { get state() { return state; }, get mouth() { return mouthOpen; } };
+window.__lia = {
+  get state() { return state; },
+  get mouth() { return mouthOpen; },
+  get camera() { return camera.position.toArray(); },
+  get renderer() { return _rendererName; },
+  get probe() { return _probe; },
+};
 
 // -- procedural life --------------------------------------------------------
 let blinkAt = performance.now() + 1500 + Math.random() * 3000;
@@ -208,6 +299,9 @@ function tick() {
   vrm.scene.scale.setScalar(s);
   vrm.update(dt);
   renderer.render(scene, camera);
+  // Read once, on the first frame that has her in it: the drawing buffer is
+  // only guaranteed to hold the frame until the browser composites it.
+  if (_probe === null) _probe = probePixels();
 }
 tick();
 
@@ -255,6 +349,17 @@ function hideMenu() { menuEl.style.display = 'none'; }
 """
 
 
+def _render_page() -> bytes:
+    """The page, with the config values the viewer needs baked into it.
+
+    A replacement rather than a template engine: two tokens, no dependency.
+    """
+    framing = VRM_FRAMING if VRM_FRAMING in ("portrait", "full") else "portrait"
+    page = _PAGE.replace("__FRAMING__", framing)
+    page = page.replace("__ALPHA_TEST__", f"{float(VRM_MATERIAL_ALPHA_TEST):.3f}")
+    return page.encode("utf-8")
+
+
 # url path -> (file on disk, mime). Served under BOTH spellings: /vendor/x.js
 # for the page's own imports, and /x.js for the relative paths the vendored
 # modules use between themselves (GLTFLoader asks for ../utils/..., which the
@@ -289,7 +394,7 @@ class _Handler(BaseHTTPRequestHandler):
         m: "VrmMascot" = self.server.mascot          # type: ignore[attr-defined]
         path = self.path.split("?", 1)[0]
         if path in ("/", "/index.html"):
-            self._send(200, _PAGE.encode("utf-8"), "text/html; charset=utf-8")
+            self._send(200, _render_page(), "text/html; charset=utf-8")
         elif path == "/model.vrm":
             if m.model_path and m.model_path.exists():
                 self._send(200, m.model_path.read_bytes(), "model/gltf-binary")
@@ -344,15 +449,326 @@ class _Api:
                 pass
 
 
+# ---------------------------------------------------- window transparency ---
+# The page has been transparent all along -- the canvas is cleared to alpha 0,
+# there is no scene background, nothing sets a page background -- and pywebview
+# is asked for transparent=True. She still appeared inside an opaque rectangle,
+# and the reason is that pywebview's entire transparency implementation is two
+# lines:
+#
+#   Form.SupportsTransparentBackColor = True   (a child-control style; a
+#                                               top-level form ignores it)
+#   WebView2.DefaultBackgroundColor = Transparent   (set before the browser is
+#                                               initialized, which WebView2 is
+#                                               documented to be fussy about)
+#
+# Neither makes the window *layered*, so on a machine where the compositor does
+# not carry the alpha there is no mechanism left for transparency to survive --
+# and the form's own background color (#F0F0F0) shows through the browser in
+# any case, which is exactly what a white rectangle around her is.
+#
+# So she does it herself, on the live window, and then checks the result by
+# looking at the screen instead of trusting the flags.
+
+
+def _window_rect(hwnd: int) -> tuple[int, int, int, int] | None:
+    """(x, y, w, h) of a window, or None."""
+    class RECT(ctypes.Structure):
+        _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                    ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+    rect = RECT()
+    if not hwnd or not ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+        return None
+    return (rect.left, rect.top,
+            rect.right - rect.left, rect.bottom - rect.top)
+
+
+def _sample_background(window) -> tuple[int, int, int] | None:
+    """The color actually painted behind her, read off the screen.
+
+    Not the color anything *claims* to use: a WebView2 whose background call
+    silently failed paints opaque white, a WebView2 that honoured it lets the
+    form's own #F0F0F0 show through, and which of the two is true depends on
+the runtime version. Sampling the border of the window and taking the most
+    common color among the samples answers it directly -- and the mode rather
+    than a single pixel means a strand of hair reaching into one corner cannot
+    decide the key for us.
+    """
+    rect = _window_rect(_avatar_hwnd(window))
+    if rect is None:
+        return None
+    x, y, w, h = rect
+    if w < 20 or h < 20:
+        return None
+    pixels = grab_screen(x, y, w, h)
+    points = [(6, 6), (w - 7, 6), (6, h - 7), (w - 7, h - 7),
+              (w // 2, 6), (6, h // 2), (w - 7, h // 2), (w // 2, h - 7)]
+    counts: dict[tuple[int, int, int], int] = {}
+    for col, row in points:
+        i = (row * w + col) * 4
+        rgb = (pixels[i + 2], pixels[i + 1], pixels[i])      # BGRA -> RGB
+        counts[rgb] = counts.get(rgb, 0) + 1
+    return max(counts, key=lambda c: counts[c])
+
+
+def _avatar_hwnd(window) -> int:
+    """The top-level Win32 handle of her window."""
+    try:
+        title = getattr(window, "title", None) or "Lia"
+        hwnd = ctypes.windll.user32.FindWindowW(None, title)
+        if hwnd:
+            return int(hwnd)
+    except Exception:
+        pass
+    return 0
+
+
+def apply_window_transparency(window) -> str:
+    """Make the window's background actually transparent. Returns a log line.
+
+    Two routes on purpose, because they fail differently: the managed one
+    (pythonnet, already loaded in this process by pywebview's WinForms
+    backend) reaches the real WebView2 control and the real Form, and the Win32
+    one below it makes the window layered regardless of what WinForms believes
+    it is doing. Both are idempotent, so running both costs nothing.
+    """
+    if str(VRM_TRANSPARENCY).lower() == "off":
+        return "transparency: left as pywebview made it (VRM_TRANSPARENCY = 'off')"
+
+    notes: list[str] = []
+    form = getattr(window, "native", None)
+
+    # 1. Ask the browser for a transparent background -- now, after the browser
+    #    exists, rather than before it is initialized the way pywebview does it.
+    #    WebView2 properties are UI-thread only, and this runs on the thread
+    #    pywebview started for us, so it has to be marshalled onto the form.
+    try:
+        from System import Action
+        from System.Drawing import Color
+
+        wv = getattr(form, "webview", None) if form is not None else None
+        if wv is not None:
+            def _clear():
+                wv.DefaultBackgroundColor = Color.Transparent
+
+            form.Invoke(Action(_clear))
+            time.sleep(0.25)                 # let it repaint before sampling
+            notes.append("browser background cleared")
+    except Exception as exc:
+        notes.append(f"browser background left alone ({type(exc).__name__})")
+
+    # 2. Whatever is painted behind her now, key it out -- sampled from the
+    #    screen, so this keys white when the call above failed and the form's
+    #    own color when it worked. An explicit VRM_COLOR_KEY overrides.
+    key = None
+    if VRM_COLOR_KEY and str(VRM_COLOR_KEY).lower() != "auto":
+        h = str(VRM_COLOR_KEY).lstrip("#")
+        if len(h) == 6:
+            try:
+                key = (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+            except ValueError:
+                key = None
+        if key is not None:
+            notes.append(f"key #{key[0]:02X}{key[1]:02X}{key[2]:02X} (from config)")
+    if key is None:
+        key = _sample_background(window)
+        if key is not None:
+            notes.append(f"key #{key[0]:02X}{key[1]:02X}{key[2]:02X} (sampled)")
+    if key is None:
+        key = (240, 240, 240)
+        notes.append("key #F0F0F0 (could not sample; WinForms default)")
+
+    # 3. the managed route: make the form paint and key the same color.
+    try:
+        from System.Drawing import Color
+
+        if form is not None:
+            key_color = Color.FromArgb(255, key[0], key[1], key[2])
+            form.BackColor = key_color
+            form.TransparencyKey = key_color
+            notes.append("form transparent-key set")
+        else:
+            notes.append("no native form to key")
+    except Exception as exc:
+        notes.append(f"form key failed ({type(exc).__name__})")
+
+    # 4. belt and braces: a layered window keyed on the same color, which also
+    #    makes those pixels click-through. Idempotent.
+    hwnd = _avatar_hwnd(window)
+    if hwnd:
+        try:
+            user32 = ctypes.windll.user32
+            GWL_EXSTYLE, WS_EX_LAYERED, LWA_COLORKEY = -20, 0x00080000, 0x1
+            style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            if not style & WS_EX_LAYERED:
+                user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED)
+                notes.append("window made layered")
+            colorref = key[0] | (key[1] << 8) | (key[2] << 16)
+            user32.SetLayeredWindowAttributes(hwnd, colorref, 0, LWA_COLORKEY)
+            notes.append("layered colour key applied")
+            # Windows 11 still draws its own chrome on a frameless layered
+            # window: a 1px border, rounded corners and a drop shadow, none of
+            # which a floating character should have -- they are the "thin
+            # white edge" that survives every renderer-side fix, and the
+            # shadow darkens the desktop in the ring around her, which is
+            # exactly where any measurement of her edges looks.
+            dwm = ctypes.windll.dwmapi
+            DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND = 33, 1
+            DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE = 34, 0xFFFFFFFE
+            for attr, value in ((DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND),
+                                (DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE)):
+                dwm.DwmSetWindowAttribute(hwnd, attr,
+                                          ctypes.byref(ctypes.c_int(value)),
+                                          ctypes.sizeof(ctypes.c_int))
+            notes.append("window border and rounding removed")
+        except Exception as exc:
+            notes.append(f"layered route failed ({type(exc).__name__})")
+    else:
+        notes.append("window handle not found")
+
+    return "transparency: " + "; ".join(notes)
+
+
+# ------------------------------------------------------------- screen probe ---
+# The only way to answer "is there still a rectangle" without a person looking
+# at it: photograph the desktop where her window is, take her away for a
+# moment, photograph it again, and compare. Transparent means the pixels she is
+# not drawn on were the desktop both times.
+
+
+class _BITMAPINFOHEADER(ctypes.Structure):
+    _fields_ = [
+        ("biSize", ctypes.c_uint32), ("biWidth", ctypes.c_int32),
+        ("biHeight", ctypes.c_int32), ("biPlanes", ctypes.c_uint16),
+        ("biBitCount", ctypes.c_uint16), ("biCompression", ctypes.c_uint32),
+        ("biSizeImage", ctypes.c_uint32), ("biXPelsPerMeter", ctypes.c_int32),
+        ("biYPelsPerMeter", ctypes.c_int32), ("biClrUsed", ctypes.c_uint32),
+        ("biClrImportant", ctypes.c_uint32),
+    ]
+
+
+class _BITMAPINFO(ctypes.Structure):
+    _fields_ = [("bmiHeader", _BITMAPINFOHEADER),
+                ("bmiColors", ctypes.c_uint32 * 3)]
+
+
+def grab_screen(x: int, y: int, w: int, h: int) -> bytes:
+    """BGRA pixels of the desktop at (x, y, w, h), top row first."""
+    user32, gdi32 = ctypes.windll.user32, ctypes.windll.gdi32
+    src = user32.GetDC(0)
+    mem = gdi32.CreateCompatibleDC(src)
+    bmp = gdi32.CreateCompatibleBitmap(src, w, h)
+    try:
+        gdi32.SelectObject(mem, bmp)
+        gdi32.BitBlt(mem, 0, 0, w, h, src, x, y, 0x00CC0020)     # SRCCOPY
+        info = _BITMAPINFO()
+        info.bmiHeader.biSize = ctypes.sizeof(_BITMAPINFOHEADER)
+        info.bmiHeader.biWidth = w
+        info.bmiHeader.biHeight = -h          # negative: rows top-down
+        info.bmiHeader.biPlanes = 1
+        info.bmiHeader.biBitCount = 32
+        buf = ctypes.create_string_buffer(w * h * 4)
+        gdi32.GetDIBits(mem, bmp, 0, h, buf, ctypes.byref(info), 0)
+        return buf.raw
+    finally:
+        gdi32.DeleteObject(bmp)
+        gdi32.DeleteDC(mem)
+        user32.ReleaseDC(0, src)
+
+
+def transparency_report(window, shot: str | None = None) -> str:
+    """Compare the pixels just inside her window's edges with the desktop just
+    outside them. Returns the verdict.
+
+    Photographing her with and without the window is the obvious test, and it
+    is the wrong one: anything moving behind her -- a terminal scrolling, a
+    video, a live wallpaper -- changes every pixel in the region between the
+    two photographs, which is indistinguishable from an opaque rectangle. So
+    this measures the thing that actually distinguishes the two cases.
+
+    An opaque background is *flat and discontinuous*: one colour repeated
+    along the whole band just inside the window edge, with no relationship to
+    the desktop one pixel outside it. A transparent one continues the
+    desktop's own pixels across the window's boundary. Two numbers per edge:
+    share-of-the-band that is a single colour, and how far the inside band sits
+    from the outside band next to it.
+    """
+    hwnd = _avatar_hwnd(window)
+    rect = _window_rect(hwnd)
+    if rect is None:
+        return "could not locate her window"
+    wx, wy, w, h = rect
+
+    pad = 8                       # a margin of the desktop around her window
+    x, y, rw, rh = wx - pad, wy - pad, w + pad * 2, h + pad * 2
+    grab = grab_screen(x, y, rw, rh)
+
+    if shot:
+        try:
+            from PIL import Image
+
+            # BGRX raw: the DIB is BGRA and its rows are already top-down
+            # (biHeight is negative), so no flip and no channel juggling.
+            Image.frombytes("RGB", (rw, rh), grab, "raw", "BGRX").save(shot)
+        except Exception as exc:
+            print(f"  (could not save {shot}: {exc})")
+
+    # Count every colour inside her window, from the raw BGRA bytes.
+    counts: dict[tuple[int, int, int], int] = {}
+    for row in range(pad, pad + h):
+        base = row * rw * 4 + pad * 4
+        for i in range(base, base + w * 4, 4):
+            c = (grab[i + 2], grab[i + 1], grab[i])
+            counts[c] = counts.get(c, 0) + 1
+    total = w * h
+
+    # The only colours an opaque avatar window can be: the two backgrounds that
+    # were painting around her before this was fixed. If either one covers any
+    # meaningful part of her window, something is painting a background; if
+    # neither does, the pixels where she is not drawn are the desktop -- and no
+    # amount of desktop, textured or flat, can be either of these two colours
+    # in bulk by coincidence.
+    suspects = (((240, 240, 240), "WinForms background #F0F0F0"),
+                ((255, 255, 255), "WebView2 default background #FFFFFF"))
+    top = sorted(counts.items(), key=lambda kv: -kv[1])[:4]
+    lines = [f"window {w}x{h} at ({wx}, {wy}) -- {total:,} pixels inside her window",
+             "most common colours inside:"]
+    for col, n in top:
+        lines.append(f"    #{col[0]:02X}{col[1]:02X}{col[2]:02X}"
+                     f"  {n / total * 100:5.1f}%")
+
+    opaque = [f"{name} covers {counts.get(c, 0) / total * 100:.1f}%"
+              for c, name in suspects if counts.get(c, 0) / total * 100 > 5]
+    if opaque:
+        lines.append("VERDICT: still opaque -- " + "; ".join(opaque))
+    else:
+        flat_col, flat_n = top[0]
+        lines.append(
+            f"no window background colour present (largest single colour is "
+            f"#{flat_col[0]:02X}{flat_col[1]:02X}{flat_col[2]:02X} at "
+            f"{flat_n / total * 100:.1f}%)")
+        lines.append("VERDICT: transparent -- what is around her is the desktop")
+        if flat_n / total > 0.7:
+            lines.append("  (that colour covers most of her window, so it is a flat "
+                         "patch of desktop behind her -- confirm with --shot if it "
+                         "looks wrong on screen)")
+    return "\n".join(lines)
+
+
 class VrmMascot:
     """Same contract mascot.py had: state_fn/on_click/menu_fn in,
     hide/show/stop/mainloop out. Runs the webview on the calling thread."""
 
-    def __init__(self, model_path: Path, state_fn=None, on_click=None, menu_fn=None):
+    def __init__(self, model_path: Path, state_fn=None, on_click=None, menu_fn=None,
+                 on_ready=None):
         self.model_path = model_path
         self._state_fn = state_fn or (lambda: "idle")
         self._on_click = on_click or (lambda: None)
         self._menu_fn = menu_fn or (lambda: [])
+        # Called with the mascot once the window is up and the model is in,
+        # on its own thread. Used by the transparency check.
+        self._on_ready = on_ready
         self._menu_cbs: dict[int, object] = {}
         self._ready = threading.Event()
         self._stopped = threading.Event()
@@ -413,6 +829,33 @@ class VrmMascot:
     def _mark_ready(self):
         self._ready.set()
 
+    def _log_renderer(self):
+        """One line saying what she is really drawing with, and whether the
+        canvas really came out transparent.
+
+        Both are unanswerable from outside the window, and both are exactly
+        what "the flags say it should be fine" got wrong before: the renderer
+        name separates hardware from software rendering ("SwiftShader" means
+        every frame is on the CPU), and the corner alpha says whether the web
+        layer is contributing any transparency of its own.
+        """
+        try:
+            name = self.window.evaluate_js("window.__lia && window.__lia.renderer")
+            probe = self.window.evaluate_js("window.__lia && window.__lia.probe")
+        except Exception:
+            return
+        bits = []
+        if name:
+            bits.append(f"WebGL via {name}")
+        if isinstance(probe, dict):
+            centre, corner = probe.get("centre"), probe.get("corner")
+            if centre and corner:
+                bits.append(f"canvas alpha centre {centre[3]}, corner {corner[3]}"
+                            + ("" if corner[3] == 0 else
+                               " -- the canvas itself is painting a background"))
+        if bits:
+            print("[avatar: " + "; ".join(bits) + "]")
+
     # -- state -> page ---------------------------------------------------
 
     def _push_state(self, want: str):
@@ -449,9 +892,14 @@ class VrmMascot:
         def _post_start():
             self._ready.wait(10)          # model may take a moment to parse
             self._place()                 # move() only works once started
+            print(f"[avatar: {apply_window_transparency(self.window)}]")
+            self._log_renderer()
             threading.Thread(target=self._poll_state, daemon=True).start()
             voice.set_audio_level_sink(self._on_level)
             self._level_sink_on = True
+            if self._on_ready is not None:
+                threading.Thread(target=self._on_ready, args=(self,),
+                                 daemon=True).start()
 
         try:
             webview.start(func=_post_start, gui="edgechromium")
@@ -487,6 +935,18 @@ class VrmMascot:
 
 # ------------------------------------------------------------------ preview ---
 
+def _check_transparency(m: "VrmMascot") -> None:
+    """Print whether the window is really transparent, then close."""
+    shot = None
+    for i, arg in enumerate(sys.argv):
+        if arg == "--shot" and i + 1 < len(sys.argv):
+            shot = sys.argv[i + 1]
+    time.sleep(1.2)                   # let a few frames land first
+    print()
+    print(transparency_report(m.window, shot=shot))
+    m.stop()
+
+
 if __name__ == "__main__":
     import itertools
 
@@ -495,6 +955,7 @@ if __name__ == "__main__":
         print(f"no .vrm found in {VRM_DIR} -- drop one in and try again")
         raise SystemExit(1)
 
+    check = "--check" in sys.argv
     cycle = itertools.cycle(_STATES)
     current = {"s": next(cycle), "m": 0.0}
 
@@ -504,8 +965,10 @@ if __name__ == "__main__":
         on_click=lambda: print("click"),
         menu_fn=lambda: [("Next state", lambda: current.update(s=next(cycle))),
                          ("-", None), ("Quit", lambda: m.stop())],
+        on_ready=_check_transparency if check else None,
     )
-    print("vrm preview -- right-click to step through states")
+    print("vrm transparency check (measuring her window's edges)" if check
+          else "vrm preview -- right-click to step through states")
 
     def step():
         while not m._stopped.is_set():
