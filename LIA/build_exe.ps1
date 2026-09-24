@@ -24,6 +24,11 @@ Write-Host "Building Lia (the running app stays up until this succeeds)..." -For
 
 if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
 
+# Rebuilds assets\lia.ico from whatever image is in assets\ first, if it's
+# missing or stale -- so a fresh checkout with only Lia.jpg still gets a
+# correct --icon below, the same auto-build app.py does at ordinary startup.
+& python LIA\make_icon.py 2>&1 | Out-Null
+
 $pyinstaller = @(
     '-m', 'PyInstaller',
     '--noconfirm',
@@ -42,9 +47,18 @@ $pyinstaller = @(
     '--collect-all', 'av',              # faster-whisper's audio decoding
     '--hidden-import', 'pystray._win32',
     '--hidden-import', 'comtypes',
-    '--paths', 'LIA',
-    'LIA\app.py'
+    '--paths', 'LIA'
 )
+
+# --icon is what Explorer, the taskbar and Alt-Tab show for the exe file
+# itself -- separate from (and previously missing alongside) the tray icon
+# and avatar-window icon, which are both set at runtime instead. Without it
+# PyInstaller falls back to its own generic icon for the file itself, even
+# though everything drawn *inside* the running app was already hers.
+$iconPath = Join-Path $PSScriptRoot 'assets\lia.ico'
+if (Test-Path $iconPath) { $pyinstaller += @('--icon', $iconPath) }
+
+$pyinstaller += 'LIA\app.py'
 
 & python @pyinstaller
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed -- the existing app is untouched" }
