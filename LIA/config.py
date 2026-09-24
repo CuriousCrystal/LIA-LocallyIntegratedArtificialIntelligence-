@@ -254,6 +254,70 @@ VRM_CLICK_THROUGH_GROW = 0
 # Where the avatar's on-screen position is remembered between runs.
 VRM_POS_FILE = DATA_DIR / "vrm_pos.json"
 
+# How hard she works to be alive. "low" (the default) is tuned for a small
+# always-on window on an integrated GPU: a low frame rate, no antialiasing,
+# 1x pixel ratio, hair physics stepped a few times a second, and her textures
+# capped well below what a full-screen close-up would want. "medium" and
+# "high" relax that in the order you would notice it. Every derived number can
+# still be set individually below, which overrides the preset.
+#
+# Why this matters: measured on this machine she idled at ~88% GPU with
+# everything maxed -- for a window nobody is staring at most of the time.
+VRM_QUALITY = "low"
+
+# Frame rates by state. Idle is where she spends almost all her life, so it is
+# where the biggest saving lives; speaking gets more so her lipsync reads.
+# These only cap the ceiling -- she draws no frame at all when nothing has
+# moved, and none when the window is hidden (see VRM_PAUSE_HIDDEN).
+VRM_FPS_ACTIVE = 24
+VRM_FPS_IDLE = 12
+VRM_FPS_SPEAKING = 24
+
+# Render resolution multiplier. 1.0 = one canvas pixel per window pixel, which
+# is what this window wants; above 1.0 is for high-DPI close-ups only, since
+# every pixel is shaded four times at 2.0.
+VRM_PIXEL_RATIO = 1.0
+
+# Antialiasing smooths the stair-stepped edges of her outline at the cost of
+# rendering the whole frame at higher internal resolution. Off by default:
+# at this window size the difference is a few pixels of her silhouette, and
+# the click-through shape clips that edge anyway.
+VRM_ANTIALIAS = False
+
+# Cap on texture resolution, applied when her model loads: anything larger is
+# drawn into a smaller canvas and replaces the original in place. Portrait
+# framing shows her face at roughly a quarter of a 512px texture's detail, so
+# 512 is the default; raise it if her face looks visibly soft at "full".
+VRM_TEXTURE_MAX = 512
+
+# Her hair, skirt and anything else with spring-bone physics are re-simulated
+# every frame by default, which is most of her per-frame CPU cost for motion
+# nobody can see at 12 fps. This steps the simulation at its own (lower) rate
+# instead. Set 0 to simulate every frame as the model author intended.
+VRM_SPRING_HZ = 12
+
+# Which model file runs: "auto" prefers character_lite.vrm when one has been
+# produced, "original" always loads the full model. The optimiser that was
+# supposed to build that lite file cannot: every gltf-transform transform --
+# even a plain copy with no transforms at all -- drops the VRM extension, the
+# expressions and the textures on this model (18.75MB in, 156KB out), so a
+# lite build would lose her face, her lipsync and her hair physics. The knob
+# and the serving logic stay: if a future tool version round-trips VRM
+# correctly, drop character_lite.vrm next to character.vrm and "auto" will
+# pick it up. See vrm/README.md for the measured details.
+VRM_MODEL = "auto"
+
+# Stop drawing entirely while she cannot be seen: hidden from her own menu, or
+# the browser tab backgrounded. A character nobody can see has no reason to
+# spend a frame; she starts again the moment she is shown.
+VRM_PAUSE_HIDDEN = True
+
+# ------------------------------------------------------------------ tray ----
+# Drop a tray_icon.png (any square PNG; 64x64 or larger) into LIA/ and it
+# replaces the drawn cat face. She overlays a small state dot on it: green
+# while listening, purple while speaking, dim when neither.
+TRAY_ICON_FILE = BASE_DIR / "tray_icon.png"
+
 # ---------------------------------------------------------------- voice ----
 # Lia speaks her replies out loud, and listens for you.
 SPEAK_ENABLED = True

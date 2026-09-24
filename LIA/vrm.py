@@ -42,6 +42,9 @@ from config import (
     VRM_DIR, VRM_SIZE, VRM_POS_FILE, VRM_FRAMING, VRM_FORCE_SOFTWARE_RENDER,
     VRM_TRANSPARENCY, VRM_COLOR_KEY, VRM_MATERIAL_ALPHA_TEST,
     VRM_CLICK_THROUGH, VRM_CLICK_THROUGH_GROW,
+    VRM_QUALITY, VRM_FPS_ACTIVE, VRM_FPS_IDLE, VRM_FPS_SPEAKING,
+    VRM_PIXEL_RATIO, VRM_ANTIALIAS, VRM_TEXTURE_MAX, VRM_SPRING_HZ,
+    VRM_MODEL, VRM_PAUSE_HIDDEN,
 )
 
 # Best effort, and only that: WebView2 reads this when it creates the browser
@@ -121,6 +124,14 @@ import { GLTFLoader } from '/vendor/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '/vendor/three-vrm.module.js';
 
 const FRAMING = '__FRAMING__';   // injected by the server: portrait | full
+// Performance knobs, injected from config.py by _render_page(). FRAMES is the
+// state->fps table (low | medium | high), and HIDDEN is 1 when she should stop
+// drawing entirely while nobody can see her.
+const FRAMES = __VRM_FRAMES__;
+const PIXEL_RATIO = __VRM_PIXEL_RATIO__;
+const SPRING_HZ = __VRM_SPRING_HZ__;
+const HIDDEN = __VRM_PAUSE_HIDDEN__;
+let springAcc = 0;
 
 let state = 'idle';
 let mouth = 0;                    // latest level from Python, 0..1
@@ -135,11 +146,15 @@ const camera = new THREE.PerspectiveCamera(22, innerWidth / innerHeight, 0.1, 20
 // alpha + premultipliedAlpha: the canvas has to carry an alpha channel itself
 // and hand it to the compositor in premultiplied form, which is what the
 // window is made of. setClearColor(0x000000, 0) is the cleared background.
+// antialias and the pixel ratio come from config: at a 240px window the AA
+// buffer is a few pixels of her silhouette that the click-through shape clips
+// anyway, and 1.0x is one canvas pixel per window pixel.
 const renderer = new THREE.WebGLRenderer({
-  alpha: true, premultipliedAlpha: true, antialias: true,
+  alpha: true, premultipliedAlpha: true, antialias: __VRM_ANTIALIAS__,
+  powerPreference: 'low-power',
 });
 renderer.setSize(innerWidth, innerHeight);
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(PIXEL_RATIO);
 renderer.setClearColor(0x000000, 0);
 document.body.appendChild(renderer.domElement);
 
@@ -224,6 +239,46 @@ loader.register((parser) => new VRMLoaderPlugin(parser));
 // but not quite transparent blend into a pale halo against whatever is behind
 // her. alphaTest discards them instead of blending them. 0 leaves the model's
 // own material settings alone, which is the default -- see VRM_MATERIAL_ALPHA_TEST.
+// Every texture larger than the cap gets redrawn into a smaller canvas and
+// replaces the original in place. The loader's originals are disposed as they
+// go, not left for the GC to find: an 18MB VRM carries tens of megabytes of
+// texture upload, and this is the difference between her sitting at 240MB of
+// RAM and 600MB of it. Called once, at load.
+function capTextures(root) {
+  if (!(__VRM_TEXTURE_MAX__ > 0)) return;
+  const seen = new Set();
+  root.traverse((o) => {
+    if (!o.material) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    for (const m of mats) {
+      for (const slot of Object.keys(m)) {
+        const tex = m[slot];
+        if (tex && tex.isTexture && tex.image && tex.image.width &&
+            !seen.has(tex.uuid)) {
+          seen.add(tex.uuid);
+          const big = Math.max(tex.image.width, tex.image.height);
+          if (big <= __VRM_TEXTURE_MAX__) continue;
+          const scale = __VRM_TEXTURE_MAX__ / big;
+          const c = document.createElement('canvas');
+          c.width = Math.max(1, Math.round(tex.image.width * scale));
+          c.height = Math.max(1, Math.round(tex.image.height * scale));
+          const ctx = c.getContext('2d');
+          ctx.drawImage(tex.image, 0, 0, c.width, c.height);
+          const small = new THREE.CanvasTexture(c);
+          small.flipY = tex.flipY;
+          small.colorSpace = tex.colorSpace;
+          small.wrapS = tex.wrapS; small.wrapT = tex.wrapT;
+          small.flipY = tex.flipY;
+          small.colorSpace = tex.colorSpace;
+          small.needsUpdate = true;
+          m[slot] = small;
+          tex.dispose();
+        }
+      }
+    }
+  });
+}
+
 function applyAlphaTest(root) {
   if (!(__ALPHA_TEST__ > 0)) return;
   root.traverse((o) => {
@@ -240,6 +295,7 @@ loader.load('/model.vrm', (gltf) => {
   vrm.scene.traverse((o) => { o.frustumCulled = false; });
   VRMUtils.rotateVRM0(vrm);        // VRM 0.x models face away otherwise
   applyAlphaTest(vrm.scene);
+  capTextures(vrm.scene);
   scene.add(vrm.scene);
 
   // Frame her. Portrait fills the window with head and shoulders -- the face
@@ -273,7 +329,17 @@ window.__lia = {
   get probe() { return _probe; },
   get mask() { return _mask; },
   requestMask(cols) { _maskCols = cols; _maskWanted = true; return true; },
+  setHidden(v) { hidden = !!v; },
 };
+
+// A character nobody can see has no reason to spend a frame. The page's own
+// visibility tells the truth about tab-backgrounding; the window's hide from
+// her menu arrives as a call from Python.
+document.addEventListener('visibilitychange', () => {
+  if (!HIDDEN) return;
+  hidden = document.hidden;
+  if (!hidden) { clock.getDelta(); }        // don't fast-forward on resume
+});
 
 // -- procedural life --------------------------------------------------------
 let blinkAt = performance.now() + 1500 + Math.random() * 3000;
@@ -290,9 +356,23 @@ function headBone() {
 }
 
 const clock = new THREE.Clock();
+let hidden = false;               // true while she cannot be seen
+let lastDrawn = 0;                // performance.now() of the last rendered frame
+
+function capFor(s) {
+  return (FRAMES && FRAMES[s]) || 12;
+}
+
 function tick() {
   requestAnimationFrame(tick);
+  if (hidden) return;             // not a frame spent on nobody
   const dt = Math.min(clock.getDelta(), 0.1);
+  const stamp = performance.now();   // 'now' is taken by the blink block below
+  // Frame-rate cap per state: skip frames until the state's interval has
+  // elapsed. Idle's 12fps is where she spends almost all her life, so it is
+  // where the saving lives; speaking buys its higher cap back in lipsync.
+  if (dt === 0 || stamp - lastDrawn < 1000 / capFor(state)) return;
+  lastDrawn = stamp;
   const t = clock.elapsedTime;
   if (!vrm) { renderer.render(scene, camera); return; }
 
@@ -341,7 +421,21 @@ function tick() {
 
   const s = 1 + Math.sin(t * 1.1) * 0.004;   // idle sway
   vrm.scene.scale.setScalar(s);
-  vrm.update(dt);
+  // Spring-bone physics on her own cadence (VRM_SPRING_HZ): vrm.update would
+  // re-simulate the hair and skirt every frame, which is most of her per-frame
+  // CPU cost for motion nobody can see at 12 fps. rAF still fires at the
+  // monitor's rate; only the frames inside the cap draw, and only these step
+  // the simulation.
+  if (SPRING_HZ > 0) {
+    if (springAcc === 0) {
+      springAcc = stamp;
+    } else if (stamp - springAcc >= 1000 / SPRING_HZ) {
+      vrm.update(dt);
+      springAcc = stamp;
+    }
+  } else {
+    vrm.update(dt);
+  }
   renderer.render(scene, camera);
   // Read once, on the first frame that has her in it: the drawing buffer is
   // only guaranteed to hold the frame until the browser composites it.
@@ -394,14 +488,53 @@ function hideMenu() { menuEl.style.display = 'none'; }
 """
 
 
+def _pick_model() -> tuple[Path, str]:
+    """Which VRM file to serve, honouring VRM_MODEL.
+
+    "auto" prefers character_lite.vrm -- the optimiser's output -- and falls
+    back to whatever model is actually there, with a note, when it has not
+    been built. Returns (path, note); the note is empty when nothing is worth
+    saying.
+    """
+    found = find_model()
+    if found is None:
+        return found, ""
+    mode = str(VRM_MODEL).lower()
+    if mode in ("original", "orig"):
+        return found, ""
+    lite = found.with_name("character_lite.vrm")
+    if lite.is_file():
+        return lite, (f"serving {lite.name} ({lite.stat().st_size // 1024 // 1024}MB) "
+                      f"instead of {found.name} ({found.stat().st_size // 1024 // 1024}MB)")
+    if mode == "lite":
+        return found, (f"VRM_MODEL = 'lite' but {lite.name} does not exist -- "
+                       f"serving {found.name} (see vrm/README.md)")
+    return found, ""
+
+
 def _render_page() -> bytes:
     """The page, with the config values the viewer needs baked into it.
 
-    A replacement rather than a template engine: two tokens, no dependency.
+    A replacement rather than a template engine: tokens, no dependency. The
+    numbers are all single values except FRAMES, which arrives as a JSON
+    object so the tick loop can look up the cap for the state it is in.
     """
+    import json as _json
+
     framing = VRM_FRAMING if VRM_FRAMING in ("portrait", "full") else "portrait"
-    page = _PAGE.replace("__FRAMING__", framing)
+    frames = {"low": 24, "medium": 30, "high": 60}[str(VRM_QUALITY).lower()]
+    page = _PAGE
+    page = page.replace("__FRAMING__", framing)
     page = page.replace("__ALPHA_TEST__", f"{float(VRM_MATERIAL_ALPHA_TEST):.3f}")
+    page = page.replace("__VRM_FRAMES__", _json.dumps({
+        "idle": VRM_FPS_IDLE, "listening": VRM_FPS_ACTIVE,
+        "thinking": VRM_FPS_ACTIVE, "speaking": VRM_FPS_SPEAKING,
+    }))
+    page = page.replace("__VRM_PIXEL_RATIO__", f"{float(VRM_PIXEL_RATIO):.2f}")
+    page = page.replace("__VRM_ANTIALIAS__", "true" if VRM_ANTIALIAS else "false")
+    page = page.replace("__VRM_SPRING_HZ__", str(int(VRM_SPRING_HZ)))
+    page = page.replace("__VRM_TEXTURE_MAX__", str(int(VRM_TEXTURE_MAX)))
+    page = page.replace("__VRM_PAUSE_HIDDEN__", "true" if VRM_PAUSE_HIDDEN else "false")
     return page.encode("utf-8")
 
 
@@ -441,8 +574,8 @@ class _Handler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             self._send(200, _render_page(), "text/html; charset=utf-8")
         elif path == "/model.vrm":
-            if m.model_path and m.model_path.exists():
-                self._send(200, m.model_path.read_bytes(), "model/gltf-binary")
+            if m.serve_path and m.serve_path.exists():
+                self._send(200, m.serve_path.read_bytes(), "model/gltf-binary")
             else:
                 self._send(404, b"no model", "text/plain")
         elif path in _VENDOR_URLS:
@@ -1029,7 +1162,12 @@ class VrmMascot:
 
     def __init__(self, model_path: Path, state_fn=None, on_click=None, menu_fn=None,
                  on_ready=None):
+        # model_path is what the app found; serve_path is what /model.vrm
+        # actually returns -- the optimised character_lite.vrm when VRM_MODEL
+        # allows it and the file exists, the found model otherwise. The note is
+        # printed once at startup so the choice is visible in the log.
         self.model_path = model_path
+        self.serve_path, self.model_note = _pick_model()
         self._state_fn = state_fn or (lambda: "idle")
         self._on_click = on_click or (lambda: None)
         self._menu_fn = menu_fn or (lambda: [])
@@ -1064,7 +1202,10 @@ class VrmMascot:
             easy_drag=False,               # drag is handled in JS (click vs drag)
             shadow=False,
         )
-        self._place()
+        # Placement waits for mainloop: window.move() blocks on pywebview's
+        # shown event, which cannot fire until webview.start runs -- calling
+        # it from the constructor held every app start for its full 15-second
+        # event timeout, invisibly, inside LiaApp.__init__.
 
     # -- placement ----------------------------------------------------------
 
@@ -1101,6 +1242,15 @@ class VrmMascot:
 
     def _mark_ready(self):
         self._ready.set()
+
+    def setHidden(self, hidden: bool):
+        """Tell the page to stop or resume drawing. Called when her window is
+        hidden from her menu; the page watches visibilitychange itself for the
+        browser-side cases."""
+        try:
+            self.window.evaluate_js(f"window.__lia.setHidden({json.dumps(bool(hidden))})")
+        except Exception:
+            pass
 
     def shape_window(self) -> str:
         """Clip the window down to her silhouette. Returns a log line.
@@ -1162,6 +1312,13 @@ class VrmMascot:
         layer is contributing any transparency of its own.
         """
         try:
+            # __pageError first: the classic script at the top of the page
+            # catches anything that kills the module before window.__lia even
+            # exists, which is exactly the failure that would otherwise show
+            # up here as two silent nulls.
+            page_error = self.window.evaluate_js("window.__pageError")
+            if page_error:
+                print(f"[avatar: the viewer page failed: {page_error}]")
             name = self.window.evaluate_js("window.__lia && window.__lia.renderer")
             probe = self.window.evaluate_js("window.__lia && window.__lia.probe")
         except Exception:
@@ -1214,6 +1371,8 @@ class VrmMascot:
         def _post_start():
             self._ready.wait(10)          # model may take a moment to parse
             self._place()                 # move() only works once started
+            if self.model_note:
+                print(f"[avatar: {self.model_note}]")
             print(f"[avatar: {apply_window_transparency(self.window)}]")
             self._log_renderer()
             print(f"[avatar: {self.shape_window()}]")
@@ -1239,6 +1398,7 @@ class VrmMascot:
 
     def hide(self):
         try:
+            self.setHidden(True)          # stop spending frames on nobody
             self.window.hide()
         except Exception:
             pass
@@ -1246,6 +1406,7 @@ class VrmMascot:
     def show(self):
         try:
             self.window.show()
+            self.setHidden(False)
         except Exception:
             pass
 
