@@ -1060,6 +1060,40 @@ def hit_test_report(window, mask: dict | None = None) -> list[str]:
     return lines
 
 
+def _set_window_icon(window) -> str:
+    """Your icon on her window's taskbar and alt-tab entries.
+
+    pywebview's frameless window takes the generic Python icon from the exe;
+    the .ico you built with make_icon.py is pushed onto the HWND directly.
+    ICON_BIG drives the taskbar/alt-tab rendering, ICON_SMALL the title bar
+    (which a frameless window does not show, but Windows still asks for).
+    """
+    try:
+        from make_icon import ICO_PATH
+    except Exception:
+        return "window icon: make_icon unavailable"
+    if not ICO_PATH.is_file():
+        return ("window icon: assets/lia.ico not built yet (drop an image "
+                "into LIA/assets/ and run make_icon.py)")
+    hwnd = _avatar_hwnd(window)
+    if not hwnd:
+        return "window icon: window handle not found"
+    user32 = ctypes.windll.user32
+    IMAGE_ICON, LR_LOADFROMFILE, LR_DEFAULTSIZE = 1, 0x00000010, 0x00000040
+    big = user32.LoadImageW(None, str(ICO_PATH), IMAGE_ICON, 0, 0,
+                            LR_LOADFROMFILE | LR_DEFAULTSIZE)
+    small = user32.LoadImageW(None, str(ICO_PATH), IMAGE_ICON, 16, 16,
+                              LR_LOADFROMFILE)
+    WM_SETICON, ICON_BIG, ICON_SMALL = 0x80, 1, 0
+    if big:
+        user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, big)
+    if small:
+        user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, small)
+    if big or small:
+        return "window icon: your assets/lia.ico on the taskbar and alt-tab"
+    return "window icon: could not load assets/lia.ico"
+
+
 def transparency_report(window, shot: str | None = None,
                         mask: dict | None = None) -> str:
     """Compare the pixels just inside her window's edges with the desktop just
@@ -1416,6 +1450,7 @@ class VrmMascot:
             if self.model_note:
                 print(f"[avatar: {self.model_note}]")
             print(f"[avatar: {apply_window_transparency(self.window)}]")
+            print(f"[avatar: {_set_window_icon(self.window)}]")
             self._log_renderer()
             print(f"[avatar: {self.shape_window()}]")
             self._shape_ready.set()
