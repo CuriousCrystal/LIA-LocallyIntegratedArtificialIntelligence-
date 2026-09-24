@@ -221,9 +221,35 @@ VRM_COLOR_KEY = "auto"
 # default: turn it up only if you can see the halo.
 VRM_MATERIAL_ALPHA_TEST = 0.0
 
-# One accepted limitation of the transparent WebView2 window: clicks on
-# transparent pixels still land on her window, so the rectangle in front of
-# her is hers. She is small; the desktop around her is not.
+# Click-through: whether the desktop around her takes the mouse, or her whole
+# rectangle does.
+#
+# "auto" (default) gives the window her actual shape. The alpha of the frame
+# she has just rendered is read back out of the page, dead cells are dropped,
+# and what is left becomes the window's region. Clicks inside her silhouette
+# stay hers -- drag to move, click to toggle listening -- and everything
+# outside it belongs to the desktop again. It also clips the anti-aliased rim
+# at her edges that a colour key cannot remove, because those pixels are not
+# part of her shape.
+#
+# A window region is all-or-nothing per pixel, so her outline follows the
+# mask's resolution instead of being anti-aliased; VRM_CLICK_THROUGH_GROW keeps
+# a little slack outside her silhouette so the clipping never bites into her
+# hair. "off" keeps pywebview's rectangle, and the space around her swallows
+# every click in it.
+VRM_CLICK_THROUGH = "auto"
+
+# Pixels of slack the click-through shape keeps around her. Every pixel is one
+# the desktop loses to her.
+#
+# Zero is the right default, which is not obvious: growing the shape closes
+# gaps as well as smoothing edges, and the background around her is mostly
+# small patches -- the corners beside her hair, the space between an arm and
+# her body. At 4px of slack every gap in a portrait-framed window closed and
+# the window was a rectangle again, which is how this default was chosen.
+# Raise it only if her outline looks visibly clipped at the edges, and lower it
+# back the moment the space around her stops taking clicks.
+VRM_CLICK_THROUGH_GROW = 0
 
 # Where the avatar's on-screen position is remembered between runs.
 VRM_POS_FILE = DATA_DIR / "vrm_pos.json"

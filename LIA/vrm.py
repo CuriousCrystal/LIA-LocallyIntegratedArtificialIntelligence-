@@ -41,6 +41,7 @@ import webview
 from config import (
     VRM_DIR, VRM_SIZE, VRM_POS_FILE, VRM_FRAMING, VRM_FORCE_SOFTWARE_RENDER,
     VRM_TRANSPARENCY, VRM_COLOR_KEY, VRM_MATERIAL_ALPHA_TEST,
+    VRM_CLICK_THROUGH, VRM_CLICK_THROUGH_GROW,
 )
 
 # Best effort, and only that: WebView2 reads this when it creates the browser
@@ -161,6 +162,47 @@ function probePixels() {
   return { size: [w, h], corner: at(2, h - 3), centre: at((w / 2) | 0, (h / 2) | 0) };
 }
 
+// The mask has to be read inside the frame that drew it, for the same reason
+// the pixel probe does: the drawing buffer is only guaranteed to hold that
+// frame until the browser composites it. So Python asks for one, the render
+// loop captures it on its next pass, and Python reads the result back.
+let _mask = null, _maskWanted = false, _maskCols = 256;
+
+// Which cells of the frame she actually occupies, for the window shape Python
+// applies. Not by reading the alpha channel: that came back saying 96% of the
+// frame was her, because this WebView2 composites the canvas onto its own
+// backdrop and the alpha in the drawing buffer does not survive that. Clearing
+// to a colour nothing of hers is, in a throwaway frame, answers the same
+// question and cannot be wrong -- whatever still shows that colour is
+// background. The colour is restored and the frame redrawn before returning,
+// so the magenta frame is never the one the browser shows. Rows come back
+// bottom-up (WebGL's own order); Python flips them.
+function silhouetteMask(cols) {
+  const w = _gl.drawingBufferWidth, h = _gl.drawingBufferHeight;
+  const key = new THREE.Color(0xff00ff);
+  const prev = renderer.getClearColor(new THREE.Color()).clone();
+  const prevAlpha = renderer.getClearAlpha();
+  renderer.setClearColor(key, 1);
+  renderer.render(scene, camera);
+  const buf = new Uint8Array(w * h * 4);
+  _gl.readPixels(0, 0, w, h, _gl.RGBA, _gl.UNSIGNED_BYTE, buf);
+  renderer.setClearColor(prev, prevAlpha);
+  renderer.render(scene, camera);
+  const rows = Math.max(1, Math.round(cols * h / w));
+  let bits = '';
+  for (let r = 0; r < rows; r++) {
+    const y = Math.min(h - 1, Math.floor((r + 0.5) * h / rows));
+    for (let c = 0; c < cols; c++) {
+      const x = Math.min(w - 1, Math.floor((c + 0.5) * w / cols));
+      const i = (y * w + x) * 4;
+      const hers = Math.abs(buf[i] - 255) > 40 || buf[i + 1] > 40 ||
+                   Math.abs(buf[i + 2] - 255) > 40;
+      bits += hers ? '1' : '0';
+    }
+  }
+  return { cols: cols, rows: rows, bits: bits };
+}
+
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
@@ -229,6 +271,8 @@ window.__lia = {
   get camera() { return camera.position.toArray(); },
   get renderer() { return _rendererName; },
   get probe() { return _probe; },
+  get mask() { return _mask; },
+  requestMask(cols) { _maskCols = cols; _maskWanted = true; return true; },
 };
 
 // -- procedural life --------------------------------------------------------
@@ -302,6 +346,7 @@ function tick() {
   // Read once, on the first frame that has her in it: the drawing buffer is
   // only guaranteed to hold the frame until the browser composites it.
   if (_probe === null) _probe = probePixels();
+  if (_maskWanted) { _mask = silhouetteMask(_maskCols); _maskWanted = false; }
 }
 tick();
 
@@ -677,7 +722,210 @@ def grab_screen(x: int, y: int, w: int, h: int) -> bytes:
         user32.ReleaseDC(0, src)
 
 
-def transparency_report(window, shot: str | None = None) -> str:
+# ------------------------------------------------------------ window shape ---
+# Resolution of the alpha mask the window is shaped from, and the resolution
+# the check re-reads it at. 256 across a ~500px window is a 2px cell: fine
+# enough that her outline is not visibly stepped, coarse enough that the mask
+# is a few thousand characters over the js bridge rather than a megapixel.
+_CLICK_THROUGH_COLS = 256
+
+# Transparency makes her *look* like she is standing on the desktop; it does
+# not stop her window from swallowing every click in the rectangle around her.
+# The gap between those two is why the window gets a region as well: the frame
+# she just rendered is read back as a coarse alpha mask, and only the cells she
+# actually occupies stay part of the window. Everything else belongs to the
+# desktop again -- and the anti-aliased rim at her edges is clipped off with
+# it, since those pixels are not part of her shape either.
+
+
+def build_region_rects(mask: dict, w: int, h: int,
+                       grow: int) -> list[tuple[int, int, int, int]]:
+    """Alpha mask cells -> (left, top, right, bottom) spans in window pixels.
+
+    The mask is scaled onto the window's own rectangle rather than converted
+    through the DPI scale factor: the canvas fills the window, so cell (r, c)
+    maps linearly onto it, and nothing here has to know whether the page is
+    rendering at 100% or 150%.
+    """
+    cols, rows = int(mask["cols"]), int(mask["rows"])
+    bits = mask["bits"]
+    rects: list[tuple[int, int, int, int]] = []
+    for r in range(rows):
+        row = bits[r * cols:(r + 1) * cols]
+        if "1" not in row:
+            continue
+        image_row = rows - 1 - r                    # mask rows are bottom-up
+        top = max(0, round(image_row * h / rows) - grow)
+        bottom = min(h, round((image_row + 1) * h / rows) + grow)
+        c = 0
+        while c < cols:
+            if row[c] != "1":
+                c += 1
+                continue
+            start = c
+            while c < cols and row[c] == "1":
+                c += 1
+            left = max(0, round(start * w / cols) - grow)
+            right = min(w, round(c * w / cols) + grow)
+            if right > left and bottom > top:
+                rects.append((left, top, right, bottom))
+    return rects
+
+
+def apply_window_region(hwnd: int, rects: list[tuple[int, int, int, int]],
+                        w: int, h: int) -> bool:
+    """Shape the window to those spans. The system owns the region afterwards."""
+    class RECTC(ctypes.Structure):
+        _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                    ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+    class RGNDATAHEADER(ctypes.Structure):
+        _fields_ = [("dwSize", ctypes.c_uint32), ("iType", ctypes.c_uint32),
+                    ("nCount", ctypes.c_uint32), ("nRgnSize", ctypes.c_uint32),
+                    ("rcBound", RECTC)]
+
+    header_size = 32                       # sizeof(RGNDATAHEADER), both bit-nesses
+    count = len(rects)
+    buf = ctypes.create_string_buffer(header_size + 16 * count)
+    header = RGNDATAHEADER.from_buffer(buf)
+    header.dwSize = header_size
+    header.iType = 1                       # RDH_RECTANGLES
+    header.nCount = count
+    header.nRgnSize = 16 * count
+    header.rcBound = RECTC(0, 0, w, h)
+    for i, (left, top, right, bottom) in enumerate(rects):
+        ctypes.memmove(ctypes.addressof(buf) + header_size + i * 16,
+                       ctypes.byref(RECTC(left, top, right, bottom)), 16)
+
+    gdi32, user32 = ctypes.windll.gdi32, ctypes.windll.user32
+    region = gdi32.ExtCreateRegion(None, len(buf), ctypes.byref(buf))
+    if not region:
+        return False
+    if not user32.SetWindowRgn(hwnd, region, True):
+        gdi32.DeleteObject(region)
+        return False
+    return True                    # SetWindowRgn took ownership of the region
+
+
+def region_contains(hwnd: int, x: int, y: int) -> bool | None:
+    """Is (x, y), in window coordinates, inside the window's region?
+
+    None means the window has no region at all -- in which case it owns its
+    whole rectangle.
+    """
+    gdi32, user32 = ctypes.windll.gdi32, ctypes.windll.user32
+    probe = gdi32.CreateRectRgn(0, 0, 0, 0)
+    try:
+        if user32.GetWindowRgn(hwnd, probe) == 0:
+            return None
+        return bool(gdi32.PtInRegion(probe, x, y))
+    finally:
+        gdi32.DeleteObject(probe)
+
+
+def hit_test_report(window, mask: dict | None = None) -> list[str]:
+    """Does her window still take the mouse everywhere she is not drawn?
+
+    The other half of "transparent": if the desktop around her cannot be
+    clicked, she is still a rectangle to the mouse even when she is nothing to
+    the eye. This checks the window's region against the shape it was built
+    from, which is the only thing that decides where clicks land.
+    """
+    hwnd = _avatar_hwnd(window)
+    rect = _window_rect(hwnd)
+    if rect is None or not hwnd:
+        return []
+    _, _, w, h = rect
+
+    # The region is the decisive test, and the reason this does not merely ask
+    # WindowFromPoint: that returns the same child window for every point of a
+    # layered window's rectangle, transparent or not, so it cannot tell
+    # click-through from a rectangle. A point outside the window's region does
+    # not belong to the window, full stop.
+    #
+    # The points come from the shape itself rather than from "the corners are
+    # obviously background": she is portrait-framed, so her hair reaches the
+    # top corners of the window and the background is a set of small patches
+    # beside it. Sampling the mask is the only way to test where the background
+    # really is.
+    # The mask the window was shaped from, when the caller has it. A freshly
+    # captured one is a later frame -- she breathes and her head sways -- so
+    # testing against it would measure her movement, not the shaping.
+    if mask is None:
+        try:
+            window.evaluate_js(f"window.__lia.requestMask({_CLICK_THROUGH_COLS})")
+            time.sleep(0.4)
+            fresh = window.evaluate_js("window.__lia.mask")
+            mask = fresh if isinstance(fresh, dict) else None
+        except Exception:
+            mask = None
+
+    lines: list[str] = []
+    if mask is None or not mask.get("bits"):
+        lines.append("VERDICT: could not read her shape, so nothing to test")
+        return lines
+
+    cols, rows, bits = int(mask["cols"]), int(mask["rows"]), str(mask["bits"])
+    her_cells = bits.count("1")
+    total_cells = cols * rows
+    lines.append(f"  her shape covers {her_cells / total_cells * 100:.1f}% of the "
+                 f"window; the other {100 - her_cells / total_cells * 100:.1f}% "
+                 "is background the desktop should get")
+
+    # Only cells that are unambiguously her or unambiguously background are
+    # tested: a cell on the edge of her outline flips between frames on its own
+    # (she breathes, her head sways), and the shape was taken from one frame
+    # and is being compared against another. Boundary drift is not a fault in
+    # the shaping, so it must not be measured as one.
+    def unambiguous(r: int, c: int) -> bool:
+        want = bits[r * cols + c]
+        for dr in (-1, 0, 1):
+            for dc in (-1, 0, 1):
+                rr, cc = r + dr, c + dc
+                if 0 <= rr < rows and 0 <= cc < cols:
+                    if bits[rr * cols + cc] != want:
+                        return False
+        return True
+
+    checked = wrong = 0
+    for r in range(rows):
+        image_row = rows - 1 - r
+        y = int((image_row + 0.5) * h / rows)
+        for c in range(cols):
+            if (r * 7 + c * 3) % 23:        # a cheap scatter, not every cell
+                continue
+            if not unambiguous(r, c):
+                continue
+            want = bits[r * cols + c] == "1"
+            x = int((c + 0.5) * w / cols)
+            got = region_contains(hwnd, x, y)
+            if got is None:
+                lines.append("VERDICT: her window has no region at all, so the "
+                             "rectangle around her still takes the mouse")
+                return lines
+            checked += 1
+            if got != want:
+                wrong += 1
+    lines.append(f"  {checked} unambiguous points tested (cells away from her "
+                 f"outline, which moves between frames): {checked - wrong} match "
+                 f"her shape, {wrong} do not")
+    if checked == 0:
+        lines.append("VERDICT: nothing sampled -- check the mask above")
+    elif wrong == 0:
+        lines.append("VERDICT: click-through works -- every unambiguous "
+                     "background point falls outside her window and every "
+                     "point of her falls inside")
+    elif wrong <= checked * 0.05:
+        lines.append("VERDICT: click-through works, with a few cells of slack "
+                     f"({wrong}/{checked} disagree)")
+    else:
+        lines.append(f"VERDICT: her shape does not match her ({wrong}/{checked} "
+                     "points disagree)")
+    return lines
+
+
+def transparency_report(window, shot: str | None = None,
+                        mask: dict | None = None) -> str:
     """Compare the pixels just inside her window's edges with the desktop just
     outside them. Returns the verdict.
 
@@ -753,7 +1001,26 @@ def transparency_report(window, shot: str | None = None) -> str:
             lines.append("  (that colour covers most of her window, so it is a flat "
                          "patch of desktop behind her -- confirm with --shot if it "
                          "looks wrong on screen)")
+    lines.append("")
+    lines.extend(hit_test_report(window, mask))
     return "\n".join(lines)
+
+
+def mask_debug(window) -> str:
+    """The alpha mask as a picture, for when the shape comes out wrong."""
+    try:
+        window.evaluate_js("window.__lia.requestMask(64)")
+        time.sleep(0.4)
+        mask = window.evaluate_js("window.__lia.mask")
+    except Exception as exc:
+        return f"mask: unavailable ({exc})"
+    if not isinstance(mask, dict) or not mask.get("bits"):
+        return "mask: nothing captured"
+    cols, rows, bits = int(mask["cols"]), int(mask["rows"]), str(mask["bits"])
+    out = [f"mask {cols}x{rows}, {bits.count('1') / (cols * rows) * 100:.0f}% hers:"]
+    for r in range(rows):                       # bottom-up, in WebGL's order
+        out.append("  " + bits[r * cols:(r + 1) * cols].replace("1", "#").replace("0", "."))
+    return "\n".join(out)
 
 
 class VrmMascot:
@@ -772,6 +1039,12 @@ class VrmMascot:
         self._menu_cbs: dict[int, object] = {}
         self._ready = threading.Event()
         self._stopped = threading.Event()
+        # Set once the window has been shaped to her silhouette, so anything
+        # that measures the window knows the shape was actually attempted, and
+        # the mask it was shaped from, so it can be tested against exactly what
+        # the window was built from.
+        self._shape_ready = threading.Event()
+        self._shape_mask: dict | None = None
         self._level_sink_on = False
 
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
@@ -828,6 +1101,55 @@ class VrmMascot:
 
     def _mark_ready(self):
         self._ready.set()
+
+    def shape_window(self) -> str:
+        """Clip the window down to her silhouette. Returns a log line.
+
+        Waits for a frame with her in it first: the mask comes from the drawing
+        buffer, and shaping the window from a frame taken before the model
+        loaded would clip her away entirely.
+        """
+        if str(VRM_CLICK_THROUGH).lower() == "off":
+            return "click-through: off (her whole rectangle takes the mouse)"
+
+        hwnd = _avatar_hwnd(self.window)
+        rect = _window_rect(hwnd)
+        if not hwnd or rect is None:
+            return "click-through: could not find her window"
+        _, _, w, h = rect
+        grow = max(0, int(VRM_CLICK_THROUGH_GROW))
+
+        mask = None
+        cols = _CLICK_THROUGH_COLS
+        for attempt in range(20):              # ~6s for the model to appear
+            try:
+                self.window.evaluate_js(f"window.__lia.requestMask({cols})")
+                time.sleep(0.2)
+                candidate = self.window.evaluate_js("window.__lia.mask")
+            except Exception:
+                candidate = None
+            if isinstance(candidate, dict) and "1" in str(candidate.get("bits", "")):
+                mask = candidate
+                break
+            time.sleep(0.15)
+        if mask is None:
+            return "click-through: nothing of her had rendered yet"
+
+        # Keep the mask the shape was actually built from: her outline moves
+        # (she breathes, her head sways), so a mask taken a second later is a
+        # different silhouette, and testing the window against that one would
+        # report the movement as a fault.
+        self._shape_mask = mask
+        rects = build_region_rects(mask, w, h, grow)
+        if not rects:
+            return "click-through: her shape came out empty"
+        if not apply_window_region(hwnd, rects, w, h):
+            return "click-through: could not shape the window"
+        cells = int(mask["cols"]) * int(mask["rows"])
+        covered = str(mask["bits"]).count("1")
+        return (f"click-through: window shaped to {len(rects)} spans from a "
+                f"{mask['cols']}x{mask['rows']} alpha mask, "
+                f"{covered / cells * 100:.0f}% of the frame is hers ({grow}px slack)")
 
     def _log_renderer(self):
         """One line saying what she is really drawing with, and whether the
@@ -894,6 +1216,8 @@ class VrmMascot:
             self._place()                 # move() only works once started
             print(f"[avatar: {apply_window_transparency(self.window)}]")
             self._log_renderer()
+            print(f"[avatar: {self.shape_window()}]")
+            self._shape_ready.set()
             threading.Thread(target=self._poll_state, daemon=True).start()
             voice.set_audio_level_sink(self._on_level)
             self._level_sink_on = True
@@ -941,9 +1265,13 @@ def _check_transparency(m: "VrmMascot") -> None:
     for i, arg in enumerate(sys.argv):
         if arg == "--shot" and i + 1 < len(sys.argv):
             shot = sys.argv[i + 1]
-    time.sleep(1.2)                   # let a few frames land first
+    m._shape_ready.wait(10)
+    time.sleep(0.6)                   # let a few frames land first
     print()
-    print(transparency_report(m.window, shot=shot))
+    print(transparency_report(m.window, shot=shot, mask=m._shape_mask))
+    if "--mask" in sys.argv:
+        print()
+        print(mask_debug(m.window))
     m.stop()
 
 
